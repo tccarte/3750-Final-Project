@@ -1,14 +1,14 @@
 // Game state
-let gameState = 'mode_select'; // 'mode_select', 'placement', 'playing', 'gameover'
+let gameState = 'mode_select';
 let gameActive = false;
-let gameMode = 'ai'; // 'ai' or 'pvp'
+let gameMode = 'ai';
 let shots = 0;
 let hits = 0;
 let misses = 0;
 
 // PvP state
 let currentPlayer = 1;
-let pvpPlacementPhase = 1; // 1 = P1 placing, 2 = P2 placing
+let pvpPlacementPhase = 1;
 let p1PlacedShips = [];
 let p2PlacedShips = [];
 let p1AttackHits = [];
@@ -20,18 +20,30 @@ let p2Shots = 0, p2Hits = 0, p2Misses = 0;
 
 // Ship placement state
 let selectedShip = null;
-let shipOrientation = 'H'; // 'H' or 'V'
+let shipOrientation = 'H';
 let playerShips = [];
 let placedShips = [];
 
-// Ships to place
+// Ships to place (5 ships)
 const shipsToPlace = [
     { type: 'carrier', size: 5 },
+    { type: 'battleship', size: 4 },
     { type: 'cruiser', size: 3 },
+    { type: 'submarine', size: 3 },
     { type: 'destroyer', size: 2 }
 ];
 
-// Initialize game
+// Ship display info
+const shipInfo = {
+    carrier:    { emoji: '🚢', name: 'Carrier' },
+    battleship: { emoji: '⛴️', name: 'Battleship' },
+    cruiser:    { emoji: '🛳️', name: 'Cruiser' },
+    submarine:  { emoji: '🛟', name: 'Submarine' },
+    destroyer:  { emoji: '⚓', name: 'Destroyer' }
+};
+
+// ===================== INIT =====================
+
 document.addEventListener('DOMContentLoaded', () => {
     if (!restoreState()) {
         showModeSelection();
@@ -50,18 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
         initPlacementPhase();
     });
 
-    document.getElementById('newGame').addEventListener('click', () => {
-        resetGame();
-    });
-
-    document.getElementById('randomPlace').addEventListener('click', () => {
-        randomPlaceShips();
-    });
-
-    document.getElementById('startGame').addEventListener('click', () => {
-        handleStartGameClick();
-    });
-
+    document.getElementById('newGame').addEventListener('click', () => resetGame());
+    document.getElementById('randomPlace').addEventListener('click', () => randomPlaceShips());
+    document.getElementById('startGame').addEventListener('click', () => handleStartGameClick());
     document.getElementById('playAgain').addEventListener('click', () => {
         hideGameOverModal();
         resetGame();
@@ -75,26 +78,124 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({ action: 'debug' })
             });
             const data = await response.json();
-            console.log('=== GAME DEBUG INFO ===');
-            console.log('State:', gameState);
-            console.log('Player Ships:', placedShips);
-            console.log('Server Data:', data);
+            console.log('=== DEBUG ===', data);
             alert('Debug info logged to console (F12)');
         } catch (error) {
             console.error('Debug error:', error);
         }
     });
 
-    // Keyboard controls
     document.addEventListener('keydown', (e) => {
         if (gameState === 'placement' && (e.key === 'r' || e.key === 'R')) {
             shipOrientation = shipOrientation === 'H' ? 'V' : 'H';
             showMessage(`Orientation: ${shipOrientation === 'H' ? 'Horizontal' : 'Vertical'}`);
         }
     });
+
+    // Leaderboard
+    fetchLeaderboard();
+
+    document.getElementById('resetStatsBtn').addEventListener('click', () => {
+        document.getElementById('resetConfirmModal').classList.add('show');
+    });
+    document.getElementById('resetCancel').addEventListener('click', () => {
+        document.getElementById('resetConfirmModal').classList.remove('show');
+    });
+    document.getElementById('resetConfirm').addEventListener('click', async () => {
+        document.getElementById('resetConfirmModal').classList.remove('show');
+        try {
+            const resp = await fetch('game.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'reset_stats' })
+            });
+            const data = await resp.json();
+            if (data.success) updateLeaderboard(data.stats);
+        } catch (e) {
+            console.error('Reset error:', e);
+        }
+    });
 });
 
-// Show mode selection screen
+// ===================== LEADERBOARD =====================
+
+async function fetchLeaderboard() {
+    try {
+        const resp = await fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'get_stats' })
+        });
+        const data = await resp.json();
+        if (data.success) updateLeaderboard(data.stats);
+    } catch (e) {
+        console.error('Leaderboard fetch error:', e);
+    }
+}
+
+function updateLeaderboard(stats) {
+    document.getElementById('lbPlayerWins').textContent = stats.wins || 0;
+    document.getElementById('lbAIWins').textContent = stats.losses || 0;
+}
+
+// ===================== SHIP TRACKER =====================
+
+function initShipTrackers() {
+    const allShips = shipsToPlace.map(s => ({
+        type: s.type,
+        size: s.size,
+        sunk: false
+    }));
+    renderTrackerList('playerShipList', allShips);
+    renderTrackerList('enemyShipList', allShips);
+    updateTrackerCount('playerShipsLeft', allShips);
+    updateTrackerCount('enemyShipsLeft', allShips);
+}
+
+function renderTrackerList(containerId, ships) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    ships.forEach(ship => {
+        const info = shipInfo[ship.type] || { emoji: '🚢', name: ship.type };
+        const el = document.createElement('div');
+        el.className = 'tracker-ship' + (ship.sunk ? ' sunk' : '');
+        el.dataset.type = ship.type;
+
+        let pips = '';
+        for (let i = 0; i < ship.size; i++) {
+            pips += '<span class="tracker-pip"></span>';
+        }
+
+        el.innerHTML = `
+            <span class="tracker-ship-icon">${info.emoji}</span>
+            <span class="tracker-ship-name">${info.name}</span>
+            <span class="tracker-ship-pips">${pips}</span>
+        `;
+        container.appendChild(el);
+    });
+}
+
+function updateTrackerCount(elementId, ships) {
+    const remaining = ships.filter(s => !s.sunk).length;
+    const el = document.getElementById(elementId);
+    if (el) el.textContent = remaining + ' remaining';
+}
+
+function updateShipTrackers(shipStatus) {
+    if (!shipStatus) return;
+    if (shipStatus.player) {
+        renderTrackerList('playerShipList', shipStatus.player);
+        updateTrackerCount('playerShipsLeft', shipStatus.player);
+    }
+    if (shipStatus.enemy) {
+        renderTrackerList('enemyShipList', shipStatus.enemy);
+        updateTrackerCount('enemyShipsLeft', shipStatus.enemy);
+    }
+}
+
+// ===================== SCREENS =====================
+
 function showModeSelection() {
     gameState = 'mode_select';
     document.getElementById('modeScreen').style.display = 'block';
@@ -103,7 +204,6 @@ function showModeSelection() {
     showMessage('Choose your game mode');
 }
 
-// Initialize placement phase
 function initPlacementPhase() {
     gameState = 'placement';
     placedShips = [];
@@ -113,12 +213,12 @@ function initPlacementPhase() {
     document.getElementById('startGame').disabled = true;
 
     if (gameMode === 'pvp') {
-        const playerLabel = pvpPlacementPhase === 1 ? 'Player 1' : 'Player 2';
-        document.getElementById('placementTitle').textContent = playerLabel + ' - Place Your Ships';
+        const label = pvpPlacementPhase === 1 ? 'Player 1' : 'Player 2';
+        document.getElementById('placementTitle').textContent = label + ' - Deploy Your Fleet';
         document.getElementById('startGame').textContent = pvpPlacementPhase === 1 ? 'Confirm Ships' : 'Start Game';
     } else {
-        document.getElementById('placementTitle').textContent = 'Place Your Ships';
-        document.getElementById('startGame').textContent = 'Start Game';
+        document.getElementById('placementTitle').textContent = 'Deploy Your Fleet';
+        document.getElementById('startGame').textContent = 'Start Game →';
     }
 
     createPlacementGrid();
@@ -126,21 +226,18 @@ function initPlacementPhase() {
     showMessage('Select a ship and place it on your board');
 }
 
-// Create placement grid
+// ===================== GRID CREATION =====================
+
 function createPlacementGrid() {
     const container = document.getElementById('placementGrid');
     container.innerHTML = '';
-
-    const grid = createGridElement('placement');
-    container.appendChild(grid);
+    container.appendChild(createGridElement('placement'));
 }
 
-// Create a grid element
 function createGridElement(gridId) {
     const wrapper = document.createElement('div');
-    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const rows = ['A','B','C','D','E','F','G','H','I','J'];
 
-    // Header
     const header = document.createElement('div');
     header.className = 'grid-header';
     header.innerHTML = '<div class="corner"></div>';
@@ -149,19 +246,16 @@ function createGridElement(gridId) {
     }
     wrapper.appendChild(header);
 
-    // Grid
     const grid = document.createElement('div');
     grid.className = 'grid';
     grid.id = gridId + 'Cells';
 
     for (let i = 0; i < 10; i++) {
-        // Row label
         const rowLabel = document.createElement('div');
         rowLabel.className = 'row-label';
         rowLabel.textContent = rows[i];
         grid.appendChild(rowLabel);
 
-        // Cells
         for (let j = 0; j < 10; j++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
@@ -176,16 +270,15 @@ function createGridElement(gridId) {
             } else if (gridId === 'computer') {
                 cell.addEventListener('click', () => handlePlayerShot(i, j, cell));
             }
-
             grid.appendChild(cell);
         }
     }
-
     wrapper.appendChild(grid);
     return wrapper;
 }
 
-// Setup ship selection
+// ===================== SHIP SELECTION =====================
+
 function setupShipSelection() {
     document.querySelectorAll('.ship-item').forEach(item => {
         item.classList.remove('selected', 'placed');
@@ -197,18 +290,17 @@ function setupShipSelection() {
                     type: item.dataset.ship,
                     size: parseInt(item.dataset.size)
                 };
-                showMessage(`Selected ${selectedShip.type} (size ${selectedShip.size}). Click to place, press R to rotate.`);
+                showMessage(`Selected ${selectedShip.type} (size ${selectedShip.size}). Click to place, R to rotate.`);
             }
         });
     });
 }
 
-// Show placement preview
+// ===================== PLACEMENT LOGIC =====================
+
 function showPlacementPreview(row, col) {
     if (!selectedShip) return;
-
     clearPlacementPreview();
-
     const cells = [];
     const size = selectedShip.size;
     let valid = true;
@@ -228,49 +320,38 @@ function showPlacementPreview(row, col) {
             cells.push(cell);
         }
     }
-
     cells.forEach(cell => {
         if (cell) cell.classList.add(valid ? 'valid-placement' : 'invalid-placement');
     });
 }
 
-// Clear placement preview
 function clearPlacementPreview() {
     document.querySelectorAll('.valid-placement, .invalid-placement').forEach(cell => {
         cell.classList.remove('valid-placement', 'invalid-placement');
     });
 }
 
-// Handle placement click
 function handlePlacementClick(row, col) {
     if (!selectedShip) {
         showMessage('Select a ship first!');
         return;
     }
-
     if (canPlaceShip(row, col, selectedShip.size, shipOrientation)) {
         placeShip(row, col, selectedShip, shipOrientation);
-
-        // Mark ship as placed
         document.querySelector(`[data-ship="${selectedShip.type}"]`).classList.add('placed');
-
         placedShips.push({
             type: selectedShip.type,
             size: selectedShip.size,
-            row: row,
-            col: col,
+            row, col,
             orientation: shipOrientation,
             positions: getShipPositions(row, col, selectedShip.size, shipOrientation)
         });
-
         selectedShip = null;
         clearPlacementPreview();
 
-        // Check if all ships placed
         if (placedShips.length === shipsToPlace.length) {
             document.getElementById('startGame').disabled = false;
-            const btnLabel = document.getElementById('startGame').textContent;
-            showMessage('All ships placed! Click "' + btnLabel + '" to continue.');
+            showMessage('All ships placed! Click "Start Game" to begin.');
         } else {
             showMessage('Ship placed! Select next ship.');
         }
@@ -280,62 +361,42 @@ function handlePlacementClick(row, col) {
     }
 }
 
-// Can place ship
 function canPlaceShip(row, col, size, orientation) {
     if (orientation === 'H') {
         if (col + size > 10) return false;
         for (let i = 0; i < size; i++) {
-            const cell = getCellElement('placementCells', row, col + i);
-            if (cell.classList.contains('ship')) return false;
+            if (getCellElement('placementCells', row, col + i).classList.contains('ship')) return false;
         }
     } else {
         if (row + size > 10) return false;
         for (let i = 0; i < size; i++) {
-            const cell = getCellElement('placementCells', row + i, col);
-            if (cell.classList.contains('ship')) return false;
+            if (getCellElement('placementCells', row + i, col).classList.contains('ship')) return false;
         }
     }
     return true;
 }
 
-// Place ship visually
 function placeShip(row, col, ship, orientation) {
     const size = ship.size;
-
     if (orientation === 'H') {
-        for (let i = 0; i < size; i++) {
-            const cell = getCellElement('placementCells', row, col + i);
-            cell.classList.add('ship');
-        }
+        for (let i = 0; i < size; i++) getCellElement('placementCells', row, col + i).classList.add('ship');
     } else {
-        for (let i = 0; i < size; i++) {
-            const cell = getCellElement('placementCells', row + i, col);
-            cell.classList.add('ship');
-        }
+        for (let i = 0; i < size; i++) getCellElement('placementCells', row + i, col).classList.add('ship');
     }
 }
 
-// Get ship positions
 function getShipPositions(row, col, size, orientation) {
-    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const rows = ['A','B','C','D','E','F','G','H','I','J'];
     const positions = [];
-
     if (orientation === 'H') {
-        for (let i = 0; i < size; i++) {
-            positions.push(rows[row] + (col + i + 1));
-        }
+        for (let i = 0; i < size; i++) positions.push(rows[row] + (col + i + 1));
     } else {
-        for (let i = 0; i < size; i++) {
-            positions.push(rows[row + i] + (col + 1));
-        }
+        for (let i = 0; i < size; i++) positions.push(rows[row + i] + (col + 1));
     }
-
     return positions;
 }
 
-// Random place ships
 function randomPlaceShips() {
-    // Clear existing
     placedShips = [];
     document.querySelectorAll('.ship-item').forEach(item => item.classList.remove('placed'));
     document.querySelectorAll('#placementCells .cell').forEach(cell => cell.classList.remove('ship'));
@@ -343,20 +404,15 @@ function randomPlaceShips() {
     shipsToPlace.forEach(ship => {
         let placed = false;
         let attempts = 0;
-
         while (!placed && attempts < 100) {
             const orientation = Math.random() < 0.5 ? 'H' : 'V';
             const row = Math.floor(Math.random() * 10);
             const col = Math.floor(Math.random() * 10);
-
             if (canPlaceShip(row, col, ship.size, orientation)) {
                 placeShip(row, col, ship, orientation);
                 placedShips.push({
-                    type: ship.type,
-                    size: ship.size,
-                    row: row,
-                    col: col,
-                    orientation: orientation,
+                    type: ship.type, size: ship.size,
+                    row, col, orientation,
                     positions: getShipPositions(row, col, ship.size, orientation)
                 });
                 document.querySelector(`[data-ship="${ship.type}"]`).classList.add('placed');
@@ -365,19 +421,18 @@ function randomPlaceShips() {
             attempts++;
         }
     });
-
     document.getElementById('startGame').disabled = false;
     showMessage('Ships randomly placed! Click "Start Game" to begin.');
     saveState();
 }
 
-// Show handoff screen between players
+// ===================== HANDOFF (PvP) =====================
+
 function showHandoff(title, message, callback) {
     document.getElementById('handoffTitle').textContent = title;
     document.getElementById('handoffMessage').textContent = message;
     const modal = document.getElementById('handoffModal');
     modal.classList.add('show');
-
     const readyBtn = document.getElementById('handoffReady');
     const handler = () => {
         modal.classList.remove('show');
@@ -387,16 +442,12 @@ function showHandoff(title, message, callback) {
     readyBtn.addEventListener('click', handler);
 }
 
-// Handle the start/confirm button click
 function handleStartGameClick() {
     if (gameMode === 'ai') {
         startGamePhase();
         return;
     }
-
-    // PvP mode
     if (pvpPlacementPhase === 1) {
-        // P1 done placing — save and handoff to P2
         p1PlacedShips = [...placedShips];
         saveState();
         showHandoff('Pass to Player 2', 'Player 2, click Ready when the other player looks away.', () => {
@@ -404,70 +455,53 @@ function handleStartGameClick() {
             initPlacementPhase();
         });
     } else {
-        // P2 done placing — save and start game
         p2PlacedShips = [...placedShips];
         startGamePhase();
     }
 }
 
-// Rebuild boards for the current player's perspective (PvP)
+// ===================== PvP BOARDS =====================
+
 function rebuildBoards() {
     const playerContainer = document.getElementById('playerGrid');
     const computerContainer = document.getElementById('computerGrid');
-
     playerContainer.innerHTML = '';
     computerContainer.innerHTML = '';
-
-    const playerGrid = createGridElement('player');
-    const computerGrid = createGridElement('computer');
-
-    playerContainer.appendChild(playerGrid);
-    computerContainer.appendChild(computerGrid);
+    playerContainer.appendChild(createGridElement('player'));
+    computerContainer.appendChild(createGridElement('computer'));
 
     const myShips = currentPlayer === 1 ? p1PlacedShips : p2PlacedShips;
-    const opponentHits = currentPlayer === 1 ? p2AttackHits : p1AttackHits;
-    const opponentMisses = currentPlayer === 1 ? p2AttackMisses : p1AttackMisses;
+    const opHits = currentPlayer === 1 ? p2AttackHits : p1AttackHits;
+    const opMisses = currentPlayer === 1 ? p2AttackMisses : p1AttackMisses;
     const myHits = currentPlayer === 1 ? p1AttackHits : p2AttackHits;
     const myMisses = currentPlayer === 1 ? p1AttackMisses : p2AttackMisses;
 
-    // Draw my ships on "Your Board"
     myShips.forEach(ship => {
         ship.positions.forEach(pos => {
-            const [row, col] = coordToRowCol(pos);
-            const cell = getCellElement('playerCells', row, col);
-            cell.classList.add('ship');
+            const [r, c] = coordToRowCol(pos);
+            getCellElement('playerCells', r, c).classList.add('ship');
         });
     });
-
-    // Mark opponent's hits/misses on "Your Board"
-    opponentHits.forEach(coord => {
-        const [row, col] = coordToRowCol(coord);
-        const cell = getCellElement('playerCells', row, col);
-        cell.classList.add('hit');
+    opHits.forEach(coord => {
+        const [r, c] = coordToRowCol(coord);
+        getCellElement('playerCells', r, c).classList.add('hit');
     });
-    opponentMisses.forEach(coord => {
-        const [row, col] = coordToRowCol(coord);
-        const cell = getCellElement('playerCells', row, col);
-        cell.classList.add('miss');
+    opMisses.forEach(coord => {
+        const [r, c] = coordToRowCol(coord);
+        getCellElement('playerCells', r, c).classList.add('miss');
     });
-
-    // Mark my hits/misses on "Enemy Board"
     myHits.forEach(coord => {
-        const [row, col] = coordToRowCol(coord);
-        const cell = getCellElement('computerCells', row, col);
-        cell.classList.add('hit');
+        const [r, c] = coordToRowCol(coord);
+        getCellElement('computerCells', r, c).classList.add('hit');
     });
     myMisses.forEach(coord => {
-        const [row, col] = coordToRowCol(coord);
-        const cell = getCellElement('computerCells', row, col);
-        cell.classList.add('miss');
+        const [r, c] = coordToRowCol(coord);
+        getCellElement('computerCells', r, c).classList.add('miss');
     });
 
-    // Update labels
     document.getElementById('playerBoardLabel').textContent = 'Player ' + currentPlayer + "'s Board";
     document.getElementById('enemyBoardLabel').textContent = 'Enemy Board';
 
-    // Update score display for current player
     if (currentPlayer === 1) {
         shots = p1Shots; hits = p1Hits; misses = p1Misses;
     } else {
@@ -476,49 +510,43 @@ function rebuildBoards() {
     updateScore();
 }
 
-// Start game phase
+// ===================== START GAME =====================
+
 async function startGamePhase() {
     gameState = 'playing';
     gameActive = true;
-    shots = 0;
-    hits = 0;
-    misses = 0;
+    shots = 0; hits = 0; misses = 0;
     currentPlayer = 1;
-
-    // Reset PvP attack tracking
     p1AttackHits = []; p1AttackMisses = [];
     p2AttackHits = []; p2AttackMisses = [];
     p1Shots = 0; p1Hits = 0; p1Misses = 0;
     p2Shots = 0; p2Hits = 0; p2Misses = 0;
 
-    // Hide placement screen, show game screen
     document.getElementById('placementScreen').style.display = 'none';
     document.getElementById('gameScreen').style.display = 'block';
 
-    // Build init request
     const initBody = {
         action: 'init',
         gameMode: gameMode,
         playerShips: gameMode === 'pvp' ? p1PlacedShips : placedShips
     };
-    if (gameMode === 'pvp') {
-        initBody.p2Ships = p2PlacedShips;
-    }
+    if (gameMode === 'pvp') initBody.p2Ships = p2PlacedShips;
 
-    // Initialize game on server
     try {
         const response = await fetch('game.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(initBody)
         });
-
         const data = await response.json();
+
         if (data.success) {
+            // Init ship trackers
+            initShipTrackers();
+            if (data.shipStatus) updateShipTrackers(data.shipStatus);
+
             if (gameMode === 'pvp') {
-                // Build initial boards then show handoff for P1
                 rebuildBoards();
-                // Hide game screen temporarily for handoff
                 document.getElementById('gameScreen').style.display = 'none';
                 showHandoff('Player 1 Goes First', 'Player 1, click Ready to start your turn.', () => {
                     document.getElementById('gameScreen').style.display = 'block';
@@ -527,24 +555,17 @@ async function startGamePhase() {
                     showMessage("Player 1's turn - click on enemy board to fire.");
                 });
             } else {
-                // AI mode — build boards normally
                 const playerContainer = document.getElementById('playerGrid');
                 const computerContainer = document.getElementById('computerGrid');
-
                 playerContainer.innerHTML = '';
                 computerContainer.innerHTML = '';
-
-                const playerGrid = createGridElement('player');
-                const computerGrid = createGridElement('computer');
-
-                playerContainer.appendChild(playerGrid);
-                computerContainer.appendChild(computerGrid);
+                playerContainer.appendChild(createGridElement('player'));
+                computerContainer.appendChild(createGridElement('computer'));
 
                 placedShips.forEach(ship => {
                     ship.positions.forEach(pos => {
-                        const [row, col] = coordToRowCol(pos);
-                        const cell = getCellElement('playerCells', row, col);
-                        cell.classList.add('ship');
+                        const [r, c] = coordToRowCol(pos);
+                        getCellElement('playerCells', r, c).classList.add('ship');
                     });
                 });
 
@@ -563,19 +584,19 @@ async function startGamePhase() {
     }
 }
 
-// Handle player shot
+// ===================== PLAYER SHOT =====================
+
 async function handlePlayerShot(row, col, cell) {
     if (!gameActive || gameState !== 'playing') {
         showMessage('Game not active!');
         return;
     }
-
     if (cell.classList.contains('hit') || cell.classList.contains('miss')) {
         showMessage('Already fired here!');
         return;
     }
 
-    const rows = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
+    const rows = ['A','B','C','D','E','F','G','H','I','J'];
     const coord = rows[row] + (col + 1);
     const action = (gameMode === 'pvp' && currentPlayer === 2) ? 'fire_p2' : 'fire';
 
@@ -583,18 +604,13 @@ async function handlePlayerShot(row, col, cell) {
         const response = await fetch('game.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                action: action,
-                coord: coord
-            })
+            body: JSON.stringify({ action, coord })
         });
-
         const data = await response.json();
 
         if (data.success) {
             const isHit = data.result === 'hit' || data.result === 'sunk';
 
-            // Update tracking arrays
             if (gameMode === 'pvp') {
                 if (currentPlayer === 1) {
                     p1Shots++;
@@ -615,7 +631,9 @@ async function handlePlayerShot(row, col, cell) {
 
             if (isHit) {
                 cell.classList.add('hit');
-                const msg = data.result === 'sunk' ? '💀 SUNK at ' + coord + '!' : '💥 HIT at ' + coord + '!';
+                const msg = data.result === 'sunk'
+                    ? '💀 SUNK ' + (data.sunkShipType || '') + ' at ' + coord + '!'
+                    : '💥 HIT at ' + coord + '!';
                 showMessage(msg);
             } else {
                 cell.classList.add('miss');
@@ -623,24 +641,19 @@ async function handlePlayerShot(row, col, cell) {
             }
 
             updateScore();
+            if (data.shipStatus) updateShipTrackers(data.shipStatus);
             saveState();
 
             if (data.gameOver) {
                 gameActive = false;
-                if (gameMode === 'pvp') {
-                    endGame(currentPlayer === 1);
-                } else {
-                    endGame(true);
-                }
+                endGame(gameMode === 'pvp' ? currentPlayer === 1 : true);
                 return;
             }
 
             if (gameMode === 'pvp') {
-                // PvP: handoff to other player
                 const nextPlayer = currentPlayer === 1 ? 2 : 1;
                 gameActive = false;
                 setTimeout(() => {
-                    // Hide game screen for handoff
                     document.getElementById('gameScreen').style.display = 'none';
                     showHandoff(
                         'Pass to Player ' + nextPlayer,
@@ -656,7 +669,6 @@ async function handlePlayerShot(row, col, cell) {
                     );
                 }, 1500);
             } else {
-                // AI mode: trigger AI turn
                 setTimeout(() => handleAITurn(), 1000);
             }
         } else {
@@ -668,10 +680,10 @@ async function handlePlayerShot(row, col, cell) {
     }
 }
 
-// Handle AI turn
+// ===================== AI TURN =====================
+
 async function handleAITurn() {
     if (!gameActive) return;
-
     showMessage('🤖 Enemy is firing...');
 
     try {
@@ -680,7 +692,6 @@ async function handleAITurn() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'ai_fire' })
         });
-
         const data = await response.json();
 
         if (data.success) {
@@ -690,7 +701,7 @@ async function handleAITurn() {
             setTimeout(() => {
                 if (data.result === 'sunk') {
                     cell.classList.add('hit');
-                    showMessage('💀 Enemy SUNK your ship at ' + data.coord + '!');
+                    showMessage('💀 Enemy SUNK your ' + (data.sunkShipType || 'ship') + ' at ' + data.coord + '!');
                 } else if (data.result === 'hit') {
                     cell.classList.add('hit');
                     showMessage('💥 Enemy HIT your ship at ' + data.coord + '!');
@@ -704,12 +715,13 @@ async function handleAITurn() {
                 } else {
                     p2AttackMisses.push(data.coord);
                 }
+
+                if (data.shipStatus) updateShipTrackers(data.shipStatus);
                 saveState();
 
-                // Check if AI won
                 if (data.gameOver) {
                     gameActive = false;
-                    setTimeout(() => endGame(false), 1000); // AI wins
+                    setTimeout(() => endGame(false), 1000);
                 } else {
                     setTimeout(() => showMessage('Your turn!'), 1500);
                 }
@@ -720,29 +732,29 @@ async function handleAITurn() {
     }
 }
 
-// Update score
+// ===================== SCORE & MESSAGES =====================
+
 function updateScore() {
     document.getElementById('shots').textContent = shots;
     document.getElementById('hits').textContent = hits;
     document.getElementById('misses').textContent = misses;
 }
 
-// Show message
 function showMessage(text, className = '') {
-    const messageEl = document.getElementById('message');
-    messageEl.textContent = text;
-    messageEl.className = 'message ' + className;
+    const el = document.getElementById('message');
+    el.textContent = text;
+    el.className = 'message ' + className;
 }
 
-// End game and fetch lifetime stats
+// ===================== END GAME =====================
+
 async function endGame(playerWon) {
     try {
         const response = await fetch('game.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'end_game' })
+            body: JSON.stringify({ action: 'end_game', playerWon: playerWon })
         });
-
         const data = await response.json();
         showGameOverModal(playerWon, data.success ? data.stats : null);
     } catch (error) {
@@ -751,12 +763,9 @@ async function endGame(playerWon) {
     }
 }
 
-// Show game over modal
 function showGameOverModal(playerWon, lifetimeStats) {
     clearSavedState();
     const modal = document.getElementById('gameOverModal');
-
-    // Update modal content
     const title = modal.querySelector('h2');
     const message = modal.querySelector('#winMessage');
 
@@ -764,35 +773,24 @@ function showGameOverModal(playerWon, lifetimeStats) {
         const winner = playerWon ? 'Player 1' : 'Player 2';
         title.textContent = winner + ' Wins!';
         message.textContent = winner + ' destroyed all enemy ships!';
-
-        // Show the winning player's stats
-        const winnerShots = playerWon ? p1Shots : p2Shots;
-        const winnerHits = playerWon ? p1Hits : p2Hits;
-        const winnerMisses = playerWon ? p1Misses : p2Misses;
-        const accuracy = winnerShots > 0 ? ((winnerHits / winnerShots) * 100).toFixed(1) : 0;
-
-        document.getElementById('finalShots').textContent = winnerShots;
-        document.getElementById('finalHits').textContent = winnerHits;
-        document.getElementById('finalMisses').textContent = winnerMisses;
-        document.getElementById('finalAccuracy').textContent = accuracy + '%';
+        const ws = playerWon ? p1Shots : p2Shots;
+        const wh = playerWon ? p1Hits : p2Hits;
+        const wm = playerWon ? p1Misses : p2Misses;
+        const acc = ws > 0 ? ((wh / ws) * 100).toFixed(1) : 0;
+        document.getElementById('finalShots').textContent = ws;
+        document.getElementById('finalHits').textContent = wh;
+        document.getElementById('finalMisses').textContent = wm;
+        document.getElementById('finalAccuracy').textContent = acc + '%';
     } else {
-        const accuracy = shots > 0 ? ((hits / shots) * 100).toFixed(1) : 0;
-
-        if (playerWon) {
-            title.textContent = '🎉 Victory! 🎉';
-            message.textContent = 'You destroyed all enemy ships!';
-        } else {
-            title.textContent = '💀 Defeat 💀';
-            message.textContent = 'The enemy destroyed all your ships!';
-        }
-
+        const acc = shots > 0 ? ((hits / shots) * 100).toFixed(1) : 0;
+        title.textContent = playerWon ? '🎉 Victory! 🎉' : '💀 Defeat 💀';
+        message.textContent = playerWon ? 'You destroyed all enemy ships!' : 'The enemy destroyed all your ships!';
         document.getElementById('finalShots').textContent = shots;
         document.getElementById('finalHits').textContent = hits;
         document.getElementById('finalMisses').textContent = misses;
-        document.getElementById('finalAccuracy').textContent = accuracy + '%';
+        document.getElementById('finalAccuracy').textContent = acc + '%';
     }
 
-    // Lifetime stats
     const lifetimeSection = document.getElementById('lifetimeStats');
     if (lifetimeStats) {
         document.getElementById('lifetimeTotalGames').textContent = lifetimeStats.totalGames;
@@ -802,35 +800,34 @@ function showGameOverModal(playerWon, lifetimeStats) {
         document.getElementById('lifetimeWinStreak').textContent = lifetimeStats.currentWinStreak;
         document.getElementById('lifetimeBestStreak').textContent = lifetimeStats.bestWinStreak;
         lifetimeSection.style.display = 'block';
+        updateLeaderboard(lifetimeStats);
     } else {
         lifetimeSection.style.display = 'none';
+        fetchLeaderboard();
     }
 
     modal.classList.add('show');
 }
 
-// Hide game over modal
 function hideGameOverModal() {
     document.getElementById('gameOverModal').classList.remove('show');
 }
 
-// Get cell element
+// ===================== HELPERS =====================
+
 function getCellElement(gridId, row, col) {
     const grid = document.getElementById(gridId);
-    // Calculate index: each row has 11 elements (1 label + 10 cells)
     const index = row * 11 + col + 1;
     return grid.children[index];
 }
 
-// Convert coord to row/col
 function coordToRowCol(coord) {
-    const rows = { 'A': 0, 'B': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'J': 9 };
-    const row = rows[coord[0]];
-    const col = parseInt(coord.substring(1)) - 1;
-    return [row, col];
+    const rows = {'A':0,'B':1,'C':2,'D':3,'E':4,'F':5,'G':6,'H':7,'I':8,'J':9};
+    return [rows[coord[0]], parseInt(coord.substring(1)) - 1];
 }
 
-// Reset game
+// ===================== RESET =====================
+
 function resetGame() {
     clearSavedState();
     hideGameOverModal();
@@ -838,8 +835,7 @@ function resetGame() {
     gameState = 'mode_select';
     currentPlayer = 1;
     pvpPlacementPhase = 1;
-    p1PlacedShips = [];
-    p2PlacedShips = [];
+    p1PlacedShips = []; p2PlacedShips = [];
     p1AttackHits = []; p1AttackMisses = [];
     p2AttackHits = []; p2AttackMisses = [];
     p1Shots = 0; p1Hits = 0; p1Misses = 0;
@@ -848,7 +844,8 @@ function resetGame() {
     showModeSelection();
 }
 
-// Save game state to localStorage
+// ===================== STATE PERSISTENCE (localStorage) =====================
+
 function saveState() {
     const state = {
         gameState, gameMode, gameActive,
@@ -863,19 +860,15 @@ function saveState() {
     localStorage.setItem('battleshipState', JSON.stringify(state));
 }
 
-// Clear saved state
 function clearSavedState() {
     localStorage.removeItem('battleshipState');
 }
 
-// Restore game state from localStorage
 function restoreState() {
     const saved = localStorage.getItem('battleshipState');
     if (!saved) return false;
-
     let state;
     try { state = JSON.parse(saved); } catch (e) { return false; }
-
     if (state.gameState !== 'placement' && state.gameState !== 'playing') return false;
 
     gameState = state.gameState;
@@ -902,25 +895,20 @@ function restoreState() {
     return true;
 }
 
-// Restore placement screen from saved state
 function restorePlacementUI() {
     const savedShips = [...placedShips];
-    initPlacementPhase(); // resets placedShips and builds fresh grid
-
+    initPlacementPhase();
     savedShips.forEach(ship => {
         placeShip(ship.row, ship.col, ship, ship.orientation);
         document.querySelector(`[data-ship="${ship.type}"]`).classList.add('placed');
         placedShips.push(ship);
     });
-
     if (placedShips.length === shipsToPlace.length) {
         document.getElementById('startGame').disabled = false;
-        const btnLabel = document.getElementById('startGame').textContent;
-        showMessage('All ships placed! Click "' + btnLabel + '" to continue.');
+        showMessage('All ships placed! Click "Start Game" to continue.');
     }
 }
 
-// Restore game screen from saved state
 function restorePlayingUI() {
     document.getElementById('modeScreen').style.display = 'none';
     document.getElementById('placementScreen').style.display = 'none';
@@ -937,37 +925,51 @@ function restorePlayingUI() {
         playerContainer.appendChild(createGridElement('player'));
         computerContainer.appendChild(createGridElement('computer'));
 
-        // Restore player ships
         placedShips.forEach(ship => {
             ship.positions.forEach(pos => {
-                const [row, col] = coordToRowCol(pos);
-                getCellElement('playerCells', row, col).classList.add('ship');
+                const [r, c] = coordToRowCol(pos);
+                getCellElement('playerCells', r, c).classList.add('ship');
             });
         });
 
-        // Restore player's shots on enemy board
         p1AttackHits.forEach(coord => {
-            const [row, col] = coordToRowCol(coord);
-            getCellElement('computerCells', row, col).classList.add('hit');
+            const [r, c] = coordToRowCol(coord);
+            getCellElement('computerCells', r, c).classList.add('hit');
         });
         p1AttackMisses.forEach(coord => {
-            const [row, col] = coordToRowCol(coord);
-            getCellElement('computerCells', row, col).classList.add('miss');
+            const [r, c] = coordToRowCol(coord);
+            getCellElement('computerCells', r, c).classList.add('miss');
         });
-
-        // Restore AI's shots on player board
         p2AttackHits.forEach(coord => {
-            const [row, col] = coordToRowCol(coord);
-            getCellElement('playerCells', row, col).classList.add('hit');
+            const [r, c] = coordToRowCol(coord);
+            getCellElement('playerCells', r, c).classList.add('hit');
         });
         p2AttackMisses.forEach(coord => {
-            const [row, col] = coordToRowCol(coord);
-            getCellElement('playerCells', row, col).classList.add('miss');
+            const [r, c] = coordToRowCol(coord);
+            getCellElement('playerCells', r, c).classList.add('miss');
         });
 
         document.getElementById('playerBoardLabel').textContent = 'Your Board';
         document.getElementById('enemyBoardLabel').textContent = 'Enemy Board';
         updateScore();
         showMessage('Game restored! Your turn - click on enemy board to fire.');
+    }
+
+    // Restore ship trackers from server
+    initShipTrackers();
+    fetchShipStatus();
+}
+
+async function fetchShipStatus() {
+    try {
+        const resp = await fetch('game.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'ship_status' })
+        });
+        const data = await resp.json();
+        if (data.success && data.shipStatus) updateShipTrackers(data.shipStatus);
+    } catch (e) {
+        console.error('Error fetching ship status:', e);
     }
 }

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=3">
+    <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
     <div class="scanline-overlay"></div>
@@ -44,6 +44,37 @@
             </div>
         </div>
 
+        <!-- Leaderboard -->
+        <div class="leaderboard">
+            <div class="leaderboard-inner">
+                <div class="lb-side lb-player">
+                    <span class="lb-label">YOU</span>
+                    <span class="lb-score" id="lbPlayerWins">0</span>
+                </div>
+                <div class="lb-center">
+                    <span class="lb-title">ALL TIME</span>
+                    <span class="lb-divider">—</span>
+                </div>
+                <div class="lb-side lb-ai">
+                    <span class="lb-score" id="lbAIWins">0</span>
+                    <span class="lb-label">AI</span>
+                </div>
+                <button id="resetStatsBtn" class="lb-reset-btn" title="Reset all-time score">↻ Reset</button>
+            </div>
+        </div>
+
+        <!-- Reset Confirmation Modal -->
+        <div id="resetConfirmModal" class="modal">
+            <div class="modal-content reset-confirm-content">
+                <h2>Reset All-Time Score?</h2>
+                <p>This will permanently clear your win/loss record. Are you sure?</p>
+                <div class="reset-confirm-buttons">
+                    <button id="resetCancel" class="btn btn-secondary">Cancel</button>
+                    <button id="resetConfirm" class="btn btn-danger">Reset</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Mode Selection Screen -->
         <div id="modeScreen" class="mode-screen">
             <div class="mode-card">
@@ -67,25 +98,35 @@
         <!-- Ship Placement Screen -->
         <div id="placementScreen" class="placement-screen" style="display: none;">
             <div class="placement-header">
-                <h2 id="placementTitle">Place Your Ships</h2>
+                <h2 id="placementTitle">Deploy Your Fleet</h2>
                 <p>Select a ship below, then click on the grid. Press <kbd>R</kbd> to rotate.</p>
             </div>
 
             <div class="ship-selection">
                 <div class="ship-item" data-ship="carrier" data-size="5">
-                    <div class="ship-visual size-5"></div>
+                    <span class="ship-emoji">🚢</span>
                     <span class="ship-name">Carrier</span>
-                    <span class="ship-size">5 cells</span>
+                    <span class="ship-size">5</span>
+                </div>
+                <div class="ship-item" data-ship="battleship" data-size="4">
+                    <span class="ship-emoji">⛴️</span>
+                    <span class="ship-name">Battleship</span>
+                    <span class="ship-size">4</span>
                 </div>
                 <div class="ship-item" data-ship="cruiser" data-size="3">
-                    <div class="ship-visual size-3"></div>
+                    <span class="ship-emoji">🛳️</span>
                     <span class="ship-name">Cruiser</span>
-                    <span class="ship-size">3 cells</span>
+                    <span class="ship-size">3</span>
+                </div>
+                <div class="ship-item" data-ship="submarine" data-size="3">
+                    <span class="ship-emoji">🛟</span>
+                    <span class="ship-name">Submarine</span>
+                    <span class="ship-size">3</span>
                 </div>
                 <div class="ship-item" data-ship="destroyer" data-size="2">
-                    <div class="ship-visual size-2"></div>
+                    <span class="ship-emoji">⚓</span>
                     <span class="ship-name">Destroyer</span>
-                    <span class="ship-size">2 cells</span>
+                    <span class="ship-size">2</span>
                 </div>
             </div>
 
@@ -103,24 +144,42 @@
         <!-- Game Screen -->
         <div id="gameScreen" class="game-screen" style="display: none;">
             <div class="boards-container">
-                <div class="board-section your-board">
-                    <div class="board-label-bar">
-                        <span class="board-dot friendly"></span>
-                        <h3 id="playerBoardLabel">Your Board</h3>
+                <div class="board-column">
+                    <div class="board-section your-board">
+                        <div class="board-label-bar">
+                            <span class="board-dot friendly"></span>
+                            <h3 id="playerBoardLabel">Your Board</h3>
+                        </div>
+                        <div id="playerGrid" class="grid-wrapper"></div>
                     </div>
-                    <div id="playerGrid" class="grid-wrapper"></div>
+                    <div class="ship-tracker" id="playerTracker">
+                        <div class="tracker-header">
+                            <span class="tracker-title">Your Fleet</span>
+                            <span class="tracker-count" id="playerShipsLeft">5 remaining</span>
+                        </div>
+                        <div class="tracker-list" id="playerShipList"></div>
+                    </div>
                 </div>
 
                 <div class="board-divider">
                     <span class="vs-badge">VS</span>
                 </div>
 
-                <div class="board-section enemy-board">
-                    <div class="board-label-bar">
-                        <span class="board-dot hostile"></span>
-                        <h3 id="enemyBoardLabel">Enemy Board</h3>
+                <div class="board-column">
+                    <div class="board-section enemy-board">
+                        <div class="board-label-bar">
+                            <span class="board-dot hostile"></span>
+                            <h3 id="enemyBoardLabel">Enemy Board</h3>
+                        </div>
+                        <div id="computerGrid" class="grid-wrapper"></div>
                     </div>
-                    <div id="computerGrid" class="grid-wrapper"></div>
+                    <div class="ship-tracker" id="enemyTracker">
+                        <div class="tracker-header">
+                            <span class="tracker-title">Enemy Fleet</span>
+                            <span class="tracker-count" id="enemyShipsLeft">5 remaining</span>
+                        </div>
+                        <div class="tracker-list" id="enemyShipList"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -200,6 +259,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=2"></script>
+    <script src="script.js?v=4"></script>
 </body>
 </html>

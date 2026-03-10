@@ -1,10 +1,10 @@
 {
-    "totalGames": 1,
-    "wins": 1,
+    "totalGames": 0,
+    "wins": 0,
     "losses": 0,
-    "totalShots": 26,
-    "totalHits": 10,
-    "bestAccuracy": 38.5,
-    "currentWinStreak": 1,
-    "bestWinStreak": 1
+    "totalShots": 0,
+    "totalHits": 0,
+    "bestAccuracy": 0,
+    "currentWinStreak": 0,
+    "bestWinStreak": 0
 }
