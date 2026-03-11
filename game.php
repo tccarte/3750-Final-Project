@@ -2,13 +2,7 @@
 session_start();
 header('Content-Type: application/json');
 
-define('DATA_DIR', __DIR__ . '/data');
-define('STATS_FILE', DATA_DIR . '/stats.json');
-
-// Ensure data directory exists
-if (!is_dir(DATA_DIR)) {
-    @mkdir(DATA_DIR, 0775, true);
-}
+require_once __DIR__ . '/db.php';
 
 // Get JSON input
 $input = json_decode(file_get_contents('php://input'), true);
@@ -30,7 +24,8 @@ if ($action === 'init') {
 } elseif ($action === 'end_game') {
     endGame();
 } elseif ($action === 'get_stats') {
-    echo json_encode(['success' => true, 'stats' => readStats()]);
+    $displayName = trim($input['displayName'] ?? '');
+    echo json_encode(['success' => true, 'stats' => getPlayerStats($displayName)]);
 } elseif ($action === 'reset_stats') {
     resetStats();
 } else {
@@ -54,6 +49,20 @@ function getShipDefinitions() {
 function initGame($input) {
     $gameMode = $input['gameMode'] ?? 'ai';
     $_SESSION['game_mode'] = $gameMode;
+
+    $displayName = trim($input['displayName'] ?? 'Guest');
+    $player = getOrCreatePlayer($displayName);
+    $_SESSION['player_id']    = $player['playerId'];
+    $_SESSION['display_name'] = $player['displayName'];
+
+    $gameId = generateUUID();
+    $_SESSION['game_id'] = $gameId;
+
+    $db = getDB();
+    $db->prepare("INSERT INTO games (gameId, gameMode, startedAt) VALUES (?, ?, NOW())")
+       ->execute([$gameId, $gameMode]);
+    $db->prepare("INSERT INTO game_participants (gameId, playerId) VALUES (?, ?)")
+       ->execute([$gameId, $player['playerId']]);
 
     $playerShips = $input['playerShips'] ?? [];
     $_SESSION['player_ships'] = convertClientShipsToServerFormat($playerShips);
@@ -435,83 +444,85 @@ function debug() {
 
 function endGame() {
     global $input;
-    $gameMode = $_SESSION['game_mode'] ?? 'ai';
-    $stats = null;
+    $gameMode  = $_SESSION['game_mode'] ?? 'ai';
+    $gameId    = $_SESSION['game_id']   ?? null;
+    $playerId  = $_SESSION['player_id'] ?? null;
+    $stats     = null;
 
-    if ($gameMode === 'ai') {
-        $playerWon = isset($input['playerWon']) ? (bool)$input['playerWon'] : false;
+    if ($gameMode === 'ai' && $gameId && $playerId) {
+        $playerWon  = isset($input['playerWon']) ? (bool)$input['playerWon'] : false;
         $shotsFired = $_SESSION['shots'] ?? 0;
-        $hitsCount = count($_SESSION['player_hits'] ?? []);
-        $stats = updateStats($playerWon, $shotsFired, $hitsCount);
+        $hitsCount  = count($_SESSION['player_hits'] ?? []);
+        $won        = $playerWon ? 1 : 0;
+
+        $db = getDB();
+
+        $db->prepare("UPDATE games SET endedAt = NOW(), winnerId = ? WHERE gameId = ?")
+           ->execute([$playerWon ? $playerId : null, $gameId]);
+
+        $db->prepare("UPDATE game_participants SET shots = ?, hits = ?, won = ? WHERE gameId = ? AND playerId = ?")
+           ->execute([$shotsFired, $hitsCount, $won, $gameId, $playerId]);
+
+        $db->prepare("UPDATE players SET totalGames = totalGames + 1, totalWins = totalWins + ?, totalLosses = totalLosses + ?, totalMoves = totalMoves + ? WHERE playerId = ?")
+           ->execute([$won, 1 - $won, $shotsFired, $playerId]);
+
+        $stmt = $db->prepare("SELECT playerId, displayName, createdAt, totalGames, totalWins, totalLosses, totalMoves FROM players WHERE playerId = ?");
+        $stmt->execute([$playerId]);
+        $stats = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
     }
 
     unset($_SESSION['player_ships'], $_SESSION['computer_ships'],
           $_SESSION['player_hits'], $_SESSION['player_misses'],
           $_SESSION['computer_hits'], $_SESSION['computer_misses'],
           $_SESSION['shots'], $_SESSION['p2_shots'], $_SESSION['game_mode'],
-          $_SESSION['ai_target_queue'], $_SESSION['ai_last_hit']);
+          $_SESSION['ai_target_queue'], $_SESSION['ai_last_hit'],
+          $_SESSION['game_id'], $_SESSION['player_id'], $_SESSION['display_name']);
 
     echo json_encode(['success' => true, 'stats' => $stats]);
 }
 
-function getDefaults() {
-    return [
-        'totalGames' => 0, 'wins' => 0, 'losses' => 0,
-        'totalShots' => 0, 'totalHits' => 0, 'bestAccuracy' => 0,
-        'currentWinStreak' => 0, 'bestWinStreak' => 0
-    ];
+function generateUUID() {
+    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+    );
 }
 
-function readStats() {
-    $defaults = getDefaults();
-    if (!file_exists(STATS_FILE)) {
-        writeStats($defaults);
-        return $defaults;
+function getOrCreatePlayer($displayName) {
+    if ($displayName === '') $displayName = 'Guest';
+    $db   = getDB();
+    $stmt = $db->prepare("SELECT * FROM players WHERE displayName = ?");
+    $stmt->execute([$displayName]);
+    $player = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$player) {
+        $playerId = generateUUID();
+        $db->prepare("INSERT INTO players (playerId, displayName, createdAt) VALUES (?, ?, NOW())")
+           ->execute([$playerId, $displayName]);
+        $player = [
+            'playerId'    => $playerId,
+            'displayName' => $displayName,
+            'createdAt'   => date('Y-m-d H:i:s'),
+            'totalGames'  => 0,
+            'totalWins'   => 0,
+            'totalLosses' => 0,
+            'totalMoves'  => 0,
+        ];
     }
-    $contents = @file_get_contents(STATS_FILE);
-    if ($contents === false) return $defaults;
-    $stats = json_decode($contents, true);
-    return is_array($stats) ? array_merge($defaults, $stats) : $defaults;
+    return $player;
 }
 
-function writeStats($stats) {
-    if (!is_dir(DATA_DIR)) {
-        @mkdir(DATA_DIR, 0775, true);
-    }
-    $result = @file_put_contents(STATS_FILE, json_encode($stats, JSON_PRETTY_PRINT), LOCK_EX);
-    if ($result !== false) {
-        @chmod(STATS_FILE, 0666);
-    } else {
-        error_log('Battleship: Cannot write stats to ' . STATS_FILE);
-    }
-}
-
-function updateStats($playerWon, $shots, $hitsCount) {
-    $stats = readStats();
-    $stats['totalGames']++;
-    $stats['totalShots'] += $shots;
-    $stats['totalHits'] += $hitsCount;
-    if ($playerWon) {
-        $stats['wins']++;
-        $stats['currentWinStreak']++;
-        if ($stats['currentWinStreak'] > $stats['bestWinStreak']) {
-            $stats['bestWinStreak'] = $stats['currentWinStreak'];
-        }
-        $accuracy = $shots > 0 ? round(($hitsCount / $shots) * 100, 1) : 0;
-        if ($accuracy > $stats['bestAccuracy']) {
-            $stats['bestAccuracy'] = $accuracy;
-        }
-    } else {
-        $stats['losses']++;
-        $stats['currentWinStreak'] = 0;
-    }
-    writeStats($stats);
-    return $stats;
+function getPlayerStats($displayName) {
+    if ($displayName === '') return null;
+    $db   = getDB();
+    $stmt = $db->prepare("SELECT playerId, displayName, createdAt, totalGames, totalWins, totalLosses, totalMoves FROM players WHERE displayName = ?");
+    $stmt->execute([$displayName]);
+    return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
 
 function resetStats() {
-    $defaults = getDefaults();
-    writeStats($defaults);
-    echo json_encode(['success' => true, 'stats' => $defaults]);
+    echo json_encode(['success' => false, 'message' => 'Stats reset not supported with database storage']);
 }
 ?>

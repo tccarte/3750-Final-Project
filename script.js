@@ -2,6 +2,7 @@
 let gameState = 'mode_select';
 let gameActive = false;
 let gameMode = 'ai';
+let displayName = '';
 let shots = 0;
 let hits = 0;
 let misses = 0;
@@ -50,12 +51,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     document.getElementById('modeAI').addEventListener('click', () => {
+        displayName = document.getElementById('playerName').value.trim() || 'Guest';
         gameMode = 'ai';
         document.getElementById('modeScreen').style.display = 'none';
         initPlacementPhase();
     });
 
     document.getElementById('modePVP').addEventListener('click', () => {
+        displayName = document.getElementById('playerName').value.trim() || 'Guest';
         gameMode = 'pvp';
         pvpPlacementPhase = 1;
         document.getElementById('modeScreen').style.display = 'none';
@@ -528,6 +531,7 @@ async function startGamePhase() {
     const initBody = {
         action: 'init',
         gameMode: gameMode,
+        displayName: displayName,
         playerShips: gameMode === 'pvp' ? p1PlacedShips : placedShips
     };
     if (gameMode === 'pvp') initBody.p2Ships = p2PlacedShips;

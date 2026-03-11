@@ -80,6 +80,10 @@
             <div class="mode-card">
                 <h2>SELECT OPERATION</h2>
                 <p class="mode-desc">Choose your engagement type</p>
+                <div class="name-input-group">
+                    <label for="playerName">CALL SIGN</label>
+                    <input type="text" id="playerName" placeholder="Enter your name" maxlength="50" autocomplete="off">
+                </div>
                 <div class="mode-buttons">
                     <button id="modeAI" class="btn btn-mode">
                         <span class="mode-icon">🤖</span>
