@@ -1,0 +1,86 @@
+## Authors
+- **Kevin Murphy**
+- **Taylor Carter**
+
+---
+
+# Battleship — Naval Command
+
+A full-stack Battleship game built with PHP, MySQL, and vanilla JavaScript. Play against a hunt/target AI or go head-to-head with a friend in local 2-player mode. Features persistent player stats, a leaderboard, and a REST API with authenticated test endpoints for automated grading.
+
+**Live Site:** https://lightslategray-dogfish-869967.hostingersite.com
+
+---
+
+## Features
+
+- **vs Computer** — AI opponent using hunt/target strategy (random shots until a hit, then systematically targets adjacent cells)
+- **vs Player** — local 2-player with handoff screens to hide boards between turns
+- **5-Ship Fleet** — Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2)
+- **Ship Placement** — click to place, press R to rotate, or use random placement
+- **Persistent Stats** — player records stored in MySQL (wins, losses, total moves, accuracy)
+- **Leaderboard** — all-time win/loss record displayed in-game
+- **State Recovery** — game state saved to localStorage so refreshing doesn't lose progress
+- **REST API** — separate database-backed API with full game lifecycle support
+- **Test Mode** — authenticated endpoints for deterministic grading (ship placement, board reveal, game reset, turn control)
+
+---
+
+## Tech Stack
+
+| Layer    | Technology                      |
+|----------|---------------------------------|
+| Frontend | HTML, CSS, Vanilla JavaScript   |
+| Backend  | PHP 8+                          |
+| Database | MySQL (PDO)                     |
+| Hosting  | Hostinger (live), XAMPP (local)  |
+
+---
+
+## Project Structure
+
+```
+Battleship/
+├── index.php           # Main HTML page (game UI)
+├── game.php            # Session-based backend (gameplay actions)
+├── api.php             # REST API (database-backed, grading support)
+├── db.php              # Database connection config
+├── script.js           # Client-side game logic & UI
+├── styles.css          # Styling (dark naval theme)
+├── .htaccess           # URL rewriting for REST routes
+├── schema_game.sql     # Game tables (players, games, game_participants)
+├── schema_api.sql      # API tables (api_players, api_games, api_ships, etc.)
+├── stats.json          # Default stats template
+├── ARCHITECTURE.md     # Detailed architecture documentation
+└── sounds/             # Audio effects
+```
+
+---
+
+## Architecture
+
+The project has two backend layers:
+
+**`game.php`** — powers the browser-based game. Uses `$_SESSION` for in-game state (ship positions, hits/misses, AI targeting queue) and writes final results to the `players`, `games`, and `game_participants` tables on game over.
+
+**`api.php`** — a stateless REST API backed entirely by the `api_*` database tables. Supports the full game lifecycle (create players, create/join games, place ships, fire shots) plus authenticated test mode endpoints for automated grading.
+
+```
+Browser ──AJAX──► game.php ──► $_SESSION + MySQL (game tables)
+
+Grader ──HTTP──► api.php ──► MySQL (api_* tables)
+```
+
+## AI Strategy
+
+The computer opponent uses a **hunt/target** algorithm:
+
+- **Hunt mode** — fires at random unvisited cells
+- **Target mode** — after scoring a hit, queues all adjacent cells (N/S/E/W) and fires at them systematically
+- **Reset** — when a ship is sunk, clears the target queue and returns to hunt mode
+
+---
+
+## Course
+
+CPSC 3750 — Internet Application Development, Clemson University, Spring 2026
