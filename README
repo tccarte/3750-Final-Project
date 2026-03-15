@@ -1,83 +1,70 @@
-## Authors
-- **Kevin Murphy**
-- **Taylor Carter**
-
----
-
 # Battleship — Naval Command
 
 A full-stack Battleship game built with PHP, MySQL, and vanilla JavaScript. Play against a hunt/target AI or go head-to-head with a friend in local 2-player mode. Features persistent player stats, a leaderboard, and a REST API with authenticated test endpoints for automated grading.
 
-**Live Site:** https://lightslategray-dogfish-869967.hostingersite.com
+**Live Site:** http://lightslategray-dogfish-869967.hostingersite.com/
 
 ---
 
-## Features
+## Project Overview
 
-- **vs Computer** — AI opponent using hunt/target strategy (random shots until a hit, then systematically targets adjacent cells)
-- **vs Player** — local 2-player with handoff screens to hide boards between turns
-- **5-Ship Fleet** — Carrier (5), Battleship (4), Cruiser (3), Submarine (3), Destroyer (2)
-- **Ship Placement** — click to place, press R to rotate, or use random placement
-- **Persistent Stats** — player records stored in MySQL (wins, losses, total moves, accuracy)
-- **Leaderboard** — all-time win/loss record displayed in-game
-- **State Recovery** — game state saved to localStorage so refreshing doesn't lose progress
-- **REST API** — separate database-backed API with full game lifecycle support
-- **Test Mode** — authenticated endpoints for deterministic grading (ship placement, board reveal, game reset, turn control)
+Battleship — Naval Command is a web-based implementation of the classic Battleship board game. Players deploy a fleet of 5 ships (Carrier, Battleship, Cruiser, Submarine, Destroyer) on a 10×10 grid, then take turns firing at the opponent's board to sink their fleet.
+
+The game supports two modes: a single-player mode against a computer opponent that uses a hunt/target AI strategy, and a local two-player mode with handoff screens to keep each player's board hidden between turns. Player statistics (wins, losses, total moves) are stored persistently in a MySQL database, and a leaderboard tracks all-time records. Game state is also saved to localStorage so that a browser refresh doesn't lose an in-progress match.
+
+A separate REST API layer was built to support automated grading, with authenticated test-mode endpoints that allow deterministic ship placement, board inspection, game resets, and turn control.
 
 ---
 
-## Tech Stack
+## Architecture Summary
 
-| Layer    | Technology                      |
-|----------|---------------------------------|
-| Frontend | HTML, CSS, Vanilla JavaScript   |
-| Backend  | PHP 8+                          |
-| Database | MySQL (PDO)                     |
-| Hosting  | Hostinger (live), XAMPP (local)  |
+The frontend (`index.php`, `script.js`, `styles.css`) runs in the browser and handles the UI, ship placement, and sending shots via AJAX.
 
----
-
-## Project Structure
+The backend has two layers. `game.php` powers the browser game using PHP sessions for in-game state and writes results to MySQL on game over. `api.php` is a separate stateless REST API that stores everything in the database directly — this is what the autograder hits.
 
 ```
-Battleship/
-├── index.php           # Main HTML page (game UI)
-├── game.php            # Session-based backend (gameplay actions)
-├── api.php             # REST API (database-backed, grading support)
-├── db.php              # Database connection config
-├── script.js           # Client-side game logic & UI
-├── styles.css          # Styling (dark naval theme)
-├── .htaccess           # URL rewriting for REST routes
-├── schema_game.sql     # Game tables (players, games, game_participants)
-├── schema_api.sql      # API tables (api_players, api_games, api_ships, etc.)
-├── stats.json          # Default stats template
-├── ARCHITECTURE.md     # Detailed architecture documentation
-└── sounds/             # Audio effects
+Browser ──AJAX──► game.php ──► $_SESSION + MySQL
+Grader  ──HTTP──► api.php  ──► MySQL
 ```
 
 ---
 
-## Architecture
+## API Description
 
-The project has two backend layers:
+The REST API (`api.php`) supports player creation, game creation, joining games, placing ships, and firing shots. All requests and responses are JSON.
 
-**`game.php`** — powers the browser-based game. Uses `$_SESSION` for in-game state (ship positions, hits/misses, AI targeting queue) and writes final results to the `players`, `games`, and `game_participants` tables on game over.
+Test-mode endpoints (`/test/games/{id}/ships`, `/test/games/{id}/board`, `/test/games/{id}/reset`, `/test/games/{id}/set-turn`) require an `X-Test-Mode` header and return 403 without it. These allow the grader to place ships deterministically, inspect board state, reset games, and control turns.
 
-**`api.php`** — a stateless REST API backed entirely by the `api_*` database tables. Supports the full game lifecycle (create players, create/join games, place ships, fire shots) plus authenticated test mode endpoints for automated grading.
+---
 
-```
-Browser ──AJAX──► game.php ──► $_SESSION + MySQL (game tables)
+## Roles & Contributions
 
-Grader ──HTTP──► api.php ──► MySQL (api_* tables)
-```
+### Kevin Murphy - frontend
+- Implemented `.htaccess` URL rewriting for clean REST routes
+- UI/UX refinements on the frontend (dark naval theme, ship tracker, leaderboard display)
+- Local development setup and debugging (XAMPP, database configuration)
+- Built and integrated the REST API layer (`api.php`) with full CRUD endpoints and test-mode support
+- README and documentation
 
-## AI Strategy
+### Taylor Carter - backend
+- Designed and implemented the core game engine (`game.php`) with session-based state management
+- Built the frontend game logic (`script.js`) including ship placement, firing, PvP handoff, and state recovery
+- Built and integrated the REST API layer (`api.php`) with full CRUD endpoints and test-mode support
+- Deployed and hosted the live site on Hostinger
 
-The computer opponent uses a **hunt/target** algorithm:
+---
 
-- **Hunt mode** — fires at random unvisited cells
-- **Target mode** — after scoring a hit, queues all adjacent cells (N/S/E/W) and fires at them systematically
-- **Reset** — when a ship is sunk, clears the target queue and returns to hunt mode
+## AI Tools Used
+
+### Claude (Anthropic) — claude.ai
+
+**How it was used:**
+
+- Giving skeleton code and bug fixing
+
+**What was NOT AI-generated:**
+
+- UI Design, grading requirements, choosing what type of logic to have, choosing how the backend should be used, etc.
 
 ---
 
