@@ -127,7 +127,7 @@ async function fetchLeaderboard() {
         const resp = await fetch('game.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'get_stats' })
+            body: JSON.stringify({ action: 'get_stats', displayName: displayName })
         });
         const data = await resp.json();
         if (data.success) updateLeaderboard(data.stats);
