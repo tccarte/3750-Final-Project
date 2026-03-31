@@ -1,0 +1,73 @@
+# Battleship — Naval Command
+
+A full-stack Battleship game built with PHP, MySQL, and vanilla JavaScript. Play against a hunt/target AI or go head-to-head with a friend in local 2-player mode. Features persistent player stats, a leaderboard, and a REST API with authenticated test endpoints for automated grading.
+
+**Live Site:** http://lightslategray-dogfish-869967.hostingersite.com/
+
+---
+
+## Project Overview
+
+Battleship — Naval Command is a web-based implementation of the classic Battleship board game. Players deploy a fleet of 5 ships (Carrier, Battleship, Cruiser, Submarine, Destroyer) on a 10×10 grid, then take turns firing at the opponent's board to sink their fleet.
+
+The game supports two modes: a single-player mode against a computer opponent that uses a hunt/target AI strategy, and a local two-player mode with handoff screens to keep each player's board hidden between turns. Player statistics (wins, losses, total moves) are stored persistently in a MySQL database, and a leaderboard tracks all-time records. Game state is also saved to localStorage so that a browser refresh doesn't lose an in-progress match.
+
+A separate REST API layer was built to support automated grading, with authenticated test-mode endpoints that allow deterministic ship placement, board inspection, game resets, and turn control.
+
+---
+
+## Architecture Summary
+
+The frontend (`index.php`, `script.js`, `styles.css`) runs in the browser and handles the UI, ship placement, and sending shots via AJAX.
+
+The backend has two layers. `game.php` powers the browser game using PHP sessions for in-game state and writes results to MySQL on game over. `api.php` is a separate stateless REST API that stores everything in the database directly — this is what the autograder hits.
+
+```
+Browser ──AJAX──► game.php ──► $_SESSION + MySQL
+Grader  ──HTTP──► api.php  ──► MySQL
+```
+
+---
+
+## API Description
+
+The REST API (`api.php`) supports player creation, game creation, joining games, placing ships, and firing shots. All requests and responses are JSON.
+
+Test-mode endpoints (`/test/games/{id}/ships`, `/test/games/{id}/board`, `/test/games/{id}/reset`, `/test/games/{id}/set-turn`) require an `X-Test-Mode` header and return 403 without it. These allow the grader to place ships deterministically, inspect board state, reset games, and control turns.
+
+---
+
+## Roles & Contributions
+
+### Kevin Murphy - frontend
+- Implemented `.htaccess` URL rewriting for clean REST routes
+- UI/UX refinements on the frontend (dark naval theme, ship tracker, leaderboard display)
+- Local development setup and debugging (XAMPP, database configuration)
+- Built and integrated the REST API layer (`api.php`) with full CRUD endpoints and test-mode support
+- README and documentation
+
+### Taylor Carter - backend
+- Designed and implemented the core game engine (`game.php`) with session-based state management
+- Built the frontend game logic (`script.js`) including ship placement, firing, PvP handoff, and state recovery
+- Built and integrated the REST API layer (`api.php`) with full CRUD endpoints and test-mode support
+- Deployed and hosted the live site on Hostinger
+
+---
+
+## AI Tools Used
+
+### Claude (Anthropic) — claude.ai
+
+**How it was used:**
+
+- Giving skeleton code and bug fixing
+
+**What was NOT AI-generated:**
+
+- UI Design, grading requirements, choosing what type of logic to have, choosing how the backend should be used, etc.
+
+---
+
+## Course
+
+CPSC 3750 — Internet Application Development, Clemson University, Spring 2026
