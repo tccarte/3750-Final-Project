@@ -43,6 +43,7 @@ function route(string $method, string $path, array $body): void {
     }
 
     // --- Production endpoints ---
+    if ($method === 'GET'  && $path === '/health') { handleHealth(); return; }
     if ($method === 'POST' && $path === '/reset') { handleReset(); return; }
     if ($method === 'POST' && $path === '/players') { handleCreatePlayer($body); return; }
     if ($method === 'GET'  && preg_match('#^/players/(\d+)/stats$#', $path, $m)) { handleGetStats((int)$m[1]); return; }
@@ -77,16 +78,28 @@ function requireFields(array $body, array $fields): void {
     }
 }
 
+function mapGameStatus(string $status): string {
+    $map = ['waiting' => 'waiting_setup', 'active' => 'playing'];
+    return $map[$status] ?? $status;
+}
+
 // ===================== PRODUCTION HANDLERS =====================
+
+// GET /api/health
+function handleHealth(): void {
+    respond(200, ['status' => 'ok']);
+}
 
 // POST /api/reset
 function handleReset(): void {
     $db = getDB();
-    $db->exec("DELETE FROM api_moves");
-    $db->exec("DELETE FROM api_ships");
-    $db->exec("DELETE FROM api_game_players");
-    $db->exec("DELETE FROM api_games");
-    $db->exec("DELETE FROM api_players");
+    $db->exec("SET FOREIGN_KEY_CHECKS = 0");
+    $db->exec("TRUNCATE TABLE api_moves");
+    $db->exec("TRUNCATE TABLE api_ships");
+    $db->exec("TRUNCATE TABLE api_game_players");
+    $db->exec("TRUNCATE TABLE api_games");
+    $db->exec("TRUNCATE TABLE api_players");
+    $db->exec("SET FOREIGN_KEY_CHECKS = 1");
     respond(200, ['status' => 'reset']);
 }
 
@@ -98,10 +111,15 @@ function handleCreatePlayer(array $body): void {
         respond(400, ['error' => 'username must be 1-50 characters']);
     }
 
+    if (!preg_match('/^[a-zA-Z0-9_]+$/', $username)) {
+        respond(400, ['error' => 'bad_request']);
+    }
+
     $db = getDB();
     $stmt = $db->prepare("SELECT id FROM api_players WHERE username = ?");
     $stmt->execute([$username]);
-    if ($stmt->fetch()) respond(409, ['error' => 'Username already taken']);
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($existing) respond(409, ['error' => 'Username already taken']);
 
     $db->prepare("INSERT INTO api_players (username, games_played, wins, losses, total_shots, total_hits) VALUES (?, 0, 0, 0, 0, 0)")->execute([$username]);
     $id = (int)$db->lastInsertId();
@@ -135,7 +153,7 @@ function handleCreateGame(array $body): void {
     $gridSize   = (int)$body['grid_size'];
     $maxPlayers = (int)$body['max_players'];
 
-    if ($gridSize < 5 || $gridSize > 15) respond(400, ['error' => 'grid_size must be between 5 and 15']);
+    if ($gridSize < 5 || $gridSize > 15) respond(400, ['error' => 'bad_request', 'message' => 'grid_size must be between 5 and 15']);
     if ($maxPlayers < 1)                 respond(400, ['error' => 'max_players must be at least 1']);
 
     $db = getDB();
@@ -152,7 +170,7 @@ function handleCreateGame(array $body): void {
         'creator_id'  => $creatorId,
         'grid_size'   => $gridSize,
         'max_players' => $maxPlayers,
-        'status'      => 'waiting',
+        'status'      => 'waiting_setup',
     ]);
 }
 
@@ -171,7 +189,7 @@ function handleJoinGame(int $gameId, array $body): void {
 
     $stmt = $db->prepare("SELECT 1 FROM api_game_players WHERE game_id = ? AND player_id = ?");
     $stmt->execute([$gameId, $playerId]);
-    if ($stmt->fetch()) respond(409, ['error' => 'Player already in this game']);
+    if ($stmt->fetch()) respond(400, ['error' => 'Player already in this game']);
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM api_game_players WHERE game_id = ?");
     $stmt->execute([$gameId]);
@@ -180,7 +198,7 @@ function handleJoinGame(int $gameId, array $body): void {
 
     $db->prepare("INSERT INTO api_game_players (game_id, player_id, turn_order, is_eliminated, ships_placed) VALUES (?, ?, ?, 0, 0)")->execute([$gameId, $playerId, $count]);
 
-    respond(200, ['game_id' => $gameId, 'player_id' => $playerId]);
+    respond(200, ['status' => 'joined', 'game_id' => $gameId, 'player_id' => $playerId]);
 }
 
 // GET /api/games/{id}
@@ -195,7 +213,7 @@ function handleGetGame(int $gameId): void {
     respond(200, [
         'game_id'            => (int)$game['id'],
         'grid_size'          => (int)$game['grid_size'],
-        'status'             => $game['status'],
+        'status'             => mapGameStatus($game['status']),
         'current_turn_index' => (int)$game['current_turn_index'],
         'active_players'     => $activePlayers,
     ]);
@@ -250,7 +268,7 @@ function handlePlaceShips(int $gameId, array $body): void {
         'status'      => 'placed',
         'game_id'     => $gameId,
         'player_id'   => $playerId,
-        'game_status' => $updatedGame['status'],
+        'game_status' => mapGameStatus($updatedGame['status']),
     ]);
 }
 
@@ -284,7 +302,7 @@ function handleFire(int $gameId, array $body): void {
     if (!$currentPlayer) $currentPlayer = $active[$currentIdx % count($active)];
 
     if ((int)$currentPlayer['player_id'] !== $playerId) {
-        respond(400, ['error' => 'It is not your turn']);
+        respond(403, ['error' => 'It is not your turn']);
     }
 
     $stmt = $db->prepare("SELECT COUNT(*) FROM api_moves WHERE game_id = ? AND player_id = ? AND row_pos = ? AND col_pos = ?");
@@ -374,7 +392,7 @@ function handleFire(int $gameId, array $body): void {
     $response = [
         'result'         => $result,
         'next_player_id' => $nextPlayerId,
-        'game_status'    => $gameStatus,
+        'game_status'    => mapGameStatus($gameStatus),
     ];
     if ($winnerId !== null) $response['winner_id'] = $winnerId;
     respond(200, $response);

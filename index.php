@@ -95,6 +95,44 @@
                         <span class="mode-label">vs Player</span>
                         <span class="mode-detail">Local 2-Player</span>
                     </button>
+                    <button id="modeOnline" class="btn btn-mode">
+                        <span class="mode-icon">🌐</span>
+                        <span class="mode-label">Online PvP</span>
+                        <span class="mode-detail">Play over Internet</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Online Lobby Screen -->
+        <div id="onlineLobby" style="display:none;">
+            <div class="mode-card">
+                <h2>ONLINE BATTLE</h2>
+                <p class="mode-desc">Play against someone on another device</p>
+                <div class="mode-buttons" style="flex-direction:column; gap:1rem;">
+                    <button id="onlineCreate" class="btn btn-mode">
+                        <span class="mode-icon">➕</span>
+                        <span class="mode-label">Create Game</span>
+                        <span class="mode-detail">Start a new game and share the ID</span>
+                    </button>
+                    <div class="online-join-row">
+                        <input type="number" id="onlineGameIdInput" placeholder="Enter Game ID" class="online-id-input">
+                        <button id="onlineJoin" class="btn btn-secondary">Join</button>
+                    </div>
+                </div>
+                <div id="onlineMessage" class="message" style="margin-top:1rem;"></div>
+                <button id="onlineBack" class="btn btn-secondary" style="margin-top:1rem;">← Back</button>
+            </div>
+        </div>
+
+        <!-- Waiting Screen -->
+        <div id="waitingScreen" style="display:none;">
+            <div class="mode-card">
+                <h2 id="waitingTitle">WAITING...</h2>
+                <p id="waitingMessage">Waiting for opponent...</p>
+                <div id="shareGameIdBox" style="display:none; margin-top:1rem;">
+                    <p>Share this Game ID with your opponent:</p>
+                    <div class="game-id-display" id="shareGameId" style="font-size:2rem; font-weight:bold; letter-spacing:0.2em; margin-top:0.5rem;"></div>
                 </div>
             </div>
         </div>
@@ -103,7 +141,14 @@
         <div id="placementScreen" class="placement-screen" style="display: none;">
             <div class="placement-header">
                 <h2 id="placementTitle">Deploy Your Fleet</h2>
-                <p>Select a ship below, then click on the grid. Press <kbd>R</kbd> to rotate.</p>
+                <p id="placementSubtitle">Select a ship below, then click on the grid. Press <kbd>R</kbd> to rotate.</p>
+            </div>
+
+            <!-- Online placement info (shown in online mode) -->
+            <div id="onlineShipSelection" style="display:none; text-align:center; margin-bottom:1rem;">
+                <p>Click <strong>3 cells</strong> on the grid to place your ships. Click again to remove.</p>
+                <div id="onlineShipCount" style="font-size:1.2rem; font-weight:bold; margin-top:0.5rem;">Ships placed: 0 / 3</div>
+                <div id="onlineGameIdDisplay" style="display:none; margin-top:0.5rem; color:#aaa;"></div>
             </div>
 
             <div class="ship-selection">
@@ -142,6 +187,7 @@
             <div class="placement-controls">
                 <button id="randomPlace" class="btn btn-secondary">⚄ Random</button>
                 <button id="startGame" class="btn btn-primary" disabled>Start Game →</button>
+                <button id="onlineConfirmPlacement" class="btn btn-primary" style="display:none;" disabled>Confirm Placement</button>
             </div>
         </div>
 
@@ -263,6 +309,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=4"></script>
+    <script src="script.js?v=5"></script>
 </body>
 </html>

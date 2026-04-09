@@ -609,3 +609,27 @@ body {
     .row-label { width: 22px; height: 28px; font-size: 0.55rem; }
     .cell { width: 28px; height: 28px; font-size: 0.8rem; }
 }
+/* ===================== ONLINE MODE ===================== */
+.online-join-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 10px;
+}
+
+.online-id-input {
+    padding: 10px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 1rem;
+    width: 160px;
+    text-align: center;
+}
+
+.online-id-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}

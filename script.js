@@ -19,6 +19,18 @@ let p2AttackMisses = [];
 let p1Shots = 0, p1Hits = 0, p1Misses = 0;
 let p2Shots = 0, p2Hits = 0, p2Misses = 0;
 
+// Online PvP state
+let onlinePlayerId = null;
+let onlineGameId = null;
+let onlineTurnOrder = null; // 0 = creator, 1 = joiner
+let onlineMyShips = [];     // [{row, col}] placed ships
+let onlineMyFired = [];     // moves I fired
+let onlineTheirFired = [];  // moves opponent fired
+let onlineShipsPlaced = []; // cells clicked during online placement
+let onlineMyTurn = false;
+let onlinePollingInterval = null;
+const API_BASE = '/api';
+
 // Ship placement state
 let selectedShip = null;
 let shipOrientation = 'H';
@@ -64,6 +76,21 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('modeScreen').style.display = 'none';
         initPlacementPhase();
     });
+
+    document.getElementById('modeOnline').addEventListener('click', () => {
+        displayName = document.getElementById('playerName').value.trim() || 'Guest';
+        gameMode = 'online';
+        document.getElementById('modeScreen').style.display = 'none';
+        document.getElementById('onlineLobby').style.display = 'block';
+    });
+    document.getElementById('onlineBack').addEventListener('click', () => {
+        document.getElementById('onlineLobby').style.display = 'none';
+        document.getElementById('modeScreen').style.display = 'block';
+        document.getElementById('onlineMessage').textContent = '';
+    });
+    document.getElementById('onlineCreate').addEventListener('click', createOnlineGame);
+    document.getElementById('onlineJoin').addEventListener('click', joinOnlineGame);
+    document.getElementById('onlineConfirmPlacement').addEventListener('click', confirmOnlinePlacement);
 
     document.getElementById('newGame').addEventListener('click', () => resetGame());
     document.getElementById('randomPlace').addEventListener('click', () => randomPlaceShips());
@@ -137,6 +164,7 @@ async function fetchLeaderboard() {
 }
 
 function updateLeaderboard(stats) {
+    if (!stats) return;
     document.getElementById('lbPlayerWins').textContent = stats.wins || 0;
     document.getElementById('lbAIWins').textContent = stats.losses || 0;
 }
@@ -271,7 +299,10 @@ function createGridElement(gridId) {
                 cell.addEventListener('mouseenter', () => showPlacementPreview(i, j));
                 cell.addEventListener('mouseleave', () => clearPlacementPreview());
             } else if (gridId === 'computer') {
-                cell.addEventListener('click', () => handlePlayerShot(i, j, cell));
+                cell.addEventListener('click', () => {
+                    if (gameMode === 'online') handleOnlineFire(i, j, cell);
+                    else handlePlayerShot(i, j, cell);
+                });
             }
             grid.appendChild(cell);
         }
@@ -335,6 +366,10 @@ function clearPlacementPreview() {
 }
 
 function handlePlacementClick(row, col) {
+    if (gameMode === 'online') {
+        handleOnlinePlacementClick(row, col);
+        return;
+    }
     if (!selectedShip) {
         showMessage('Select a ship first!');
         return;
@@ -753,6 +788,11 @@ function showMessage(text, className = '') {
 // ===================== END GAME =====================
 
 async function endGame(playerWon) {
+    if (gameMode === 'online') {
+        stopOnlinePolling();
+        showGameOverModal(playerWon, null);
+        return;
+    }
     try {
         const response = await fetch('game.php', {
             method: 'POST',
@@ -833,6 +873,19 @@ function coordToRowCol(coord) {
 // ===================== RESET =====================
 
 function resetGame() {
+    stopOnlinePolling();
+    onlinePlayerId = null; onlineGameId = null; onlineTurnOrder = null;
+    onlineMyShips = []; onlineMyFired = []; onlineTheirFired = [];
+    onlineShipsPlaced = []; onlineMyTurn = false;
+    document.getElementById('onlineLobby').style.display = 'none';
+    document.getElementById('waitingScreen').style.display = 'none';
+    document.querySelector('.ship-selection').style.display = '';
+    document.getElementById('onlineShipSelection').style.display = 'none';
+    document.getElementById('onlineConfirmPlacement').style.display = 'none';
+    document.getElementById('startGame').style.display = '';
+    document.getElementById('randomPlace').style.display = '';
+    document.getElementById('placementSubtitle').style.display = '';
+
     clearSavedState();
     hideGameOverModal();
     gameActive = false;
@@ -975,5 +1028,264 @@ async function fetchShipStatus() {
         if (data.success && data.shipStatus) updateShipTrackers(data.shipStatus);
     } catch (e) {
         console.error('Error fetching ship status:', e);
+    }
+}
+
+// ===================== ONLINE PvP =====================
+
+async function apiPost(endpoint, body) {
+    const resp = await fetch(API_BASE + endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    return resp.json();
+}
+
+async function apiGet(endpoint) {
+    const resp = await fetch(API_BASE + endpoint);
+    return resp.json();
+}
+
+async function createOnlineGame() {
+    const btn = document.getElementById('onlineCreate');
+    btn.disabled = true;
+    document.getElementById('onlineMessage').textContent = 'Creating game...';
+    try {
+        const pResp = await apiPost('/players', { username: displayName });
+        if (!pResp.player_id) throw new Error(pResp.error || 'Could not create player');
+        onlinePlayerId = pResp.player_id;
+        onlineTurnOrder = 0;
+
+        const gResp = await apiPost('/games', { creator_id: onlinePlayerId, grid_size: 10, max_players: 2 });
+        if (!gResp.game_id) throw new Error(gResp.error || 'Could not create game');
+        onlineGameId = gResp.game_id;
+
+        document.getElementById('onlineLobby').style.display = 'none';
+        showOnlinePlacement();
+    } catch (e) {
+        document.getElementById('onlineMessage').textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+    }
+}
+
+async function joinOnlineGame() {
+    const gameIdVal = document.getElementById('onlineGameIdInput').value.trim();
+    if (!gameIdVal) { document.getElementById('onlineMessage').textContent = 'Enter a Game ID'; return; }
+    const btn = document.getElementById('onlineJoin');
+    btn.disabled = true;
+    document.getElementById('onlineMessage').textContent = 'Joining...';
+    try {
+        const pResp = await apiPost('/players', { username: displayName });
+        if (!pResp.player_id) throw new Error(pResp.error || 'Could not create player');
+        onlinePlayerId = pResp.player_id;
+        onlineTurnOrder = 1;
+        onlineGameId = parseInt(gameIdVal);
+
+        const jResp = await apiPost('/games/' + onlineGameId + '/join', { player_id: onlinePlayerId });
+        if (jResp.error) throw new Error(jResp.error);
+
+        document.getElementById('onlineLobby').style.display = 'none';
+        showOnlinePlacement();
+    } catch (e) {
+        document.getElementById('onlineMessage').textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+    }
+}
+
+function showOnlinePlacement() {
+    gameState = 'placement';
+    onlineShipsPlaced = [];
+    document.getElementById('placementScreen').style.display = 'block';
+    document.querySelector('.ship-selection').style.display = 'none';
+    document.getElementById('onlineShipSelection').style.display = 'block';
+    document.getElementById('placementSubtitle').style.display = 'none';
+    document.getElementById('startGame').style.display = 'none';
+    document.getElementById('randomPlace').style.display = 'none';
+    document.getElementById('onlineConfirmPlacement').style.display = 'inline-block';
+    document.getElementById('onlineConfirmPlacement').disabled = true;
+    document.getElementById('placementTitle').textContent = 'Place Your 3 Ships';
+
+    if (onlineTurnOrder === 0) {
+        document.getElementById('onlineGameIdDisplay').textContent = 'Game ID: ' + onlineGameId + ' — share this with your opponent';
+        document.getElementById('onlineGameIdDisplay').style.display = 'block';
+    }
+
+    createPlacementGrid();
+    showMessage('Click 3 cells on the grid to place your ships.');
+}
+
+function handleOnlinePlacementClick(row, col) {
+    const cell = getCellElement('placementCells', row, col);
+    const idx = onlineShipsPlaced.findIndex(s => s.row === row && s.col === col);
+    if (idx !== -1) {
+        onlineShipsPlaced.splice(idx, 1);
+        cell.classList.remove('ship');
+    } else if (onlineShipsPlaced.length < 3) {
+        onlineShipsPlaced.push({ row, col });
+        cell.classList.add('ship');
+    } else {
+        showMessage('3 ships already placed. Click a ship to remove it.');
+        return;
+    }
+    document.getElementById('onlineShipCount').innerHTML = 'Ships placed: <strong>' + onlineShipsPlaced.length + ' / 3</strong>';
+    document.getElementById('onlineConfirmPlacement').disabled = onlineShipsPlaced.length < 3;
+    const left = 3 - onlineShipsPlaced.length;
+    showMessage(left > 0 ? left + ' ship(s) left to place.' : 'All ships placed! Click Confirm.');
+}
+
+async function confirmOnlinePlacement() {
+    if (onlineShipsPlaced.length !== 3) return;
+    const btn = document.getElementById('onlineConfirmPlacement');
+    btn.disabled = true;
+    showMessage('Confirming placement...');
+    try {
+        const resp = await apiPost('/games/' + onlineGameId + '/place', {
+            player_id: onlinePlayerId,
+            ships: onlineShipsPlaced
+        });
+        if (resp.error) throw new Error(resp.error);
+        onlineMyShips = [...onlineShipsPlaced];
+        document.getElementById('placementScreen').style.display = 'none';
+        showWaitingScreen();
+        startOnlinePolling();
+    } catch (e) {
+        showMessage('Error: ' + e.message);
+        btn.disabled = false;
+    }
+}
+
+function showWaitingScreen() {
+    document.getElementById('waitingScreen').style.display = 'block';
+    document.getElementById('waitingTitle').textContent = 'SHIPS PLACED';
+    document.getElementById('waitingMessage').textContent = 'Waiting for opponent to place their ships...';
+    if (onlineTurnOrder === 0) {
+        document.getElementById('shareGameIdBox').style.display = 'block';
+        document.getElementById('shareGameId').textContent = onlineGameId;
+    }
+}
+
+function startOnlinePolling() {
+    stopOnlinePolling();
+    onlinePollingInterval = setInterval(checkOnlineGameState, 2000);
+}
+
+function stopOnlinePolling() {
+    if (onlinePollingInterval) { clearInterval(onlinePollingInterval); onlinePollingInterval = null; }
+}
+
+async function checkOnlineGameState() {
+    try {
+        const game = await apiGet('/games/' + onlineGameId);
+        if (game.error) return;
+
+        const status = game.status;
+        if (status === 'waiting_setup') return; // still placing
+
+        if ((status === 'playing' || status === 'active') && gameState !== 'playing') {
+            document.getElementById('waitingScreen').style.display = 'none';
+            await startOnlineGame(game);
+        }
+
+        onlineMyTurn = (game.current_turn_index === onlineTurnOrder);
+        updateOnlineTurnUI();
+        await updateOnlineMoves();
+
+        if (status === 'finished') {
+            stopOnlinePolling();
+            gameActive = false;
+            endGame(game.winner_id === onlinePlayerId);
+        }
+    } catch (e) {
+        console.error('Polling error:', e);
+    }
+}
+
+async function startOnlineGame(game) {
+    gameState = 'playing';
+    gameActive = true;
+    shots = 0; hits = 0; misses = 0;
+    onlineMyFired = []; onlineTheirFired = [];
+
+    document.getElementById('gameScreen').style.display = 'block';
+
+    const playerContainer = document.getElementById('playerGrid');
+    const computerContainer = document.getElementById('computerGrid');
+    playerContainer.innerHTML = '';
+    computerContainer.innerHTML = '';
+    playerContainer.appendChild(createGridElement('player'));
+    computerContainer.appendChild(createGridElement('computer'));
+
+    onlineMyShips.forEach(s => {
+        const cell = getCellElement('playerCells', s.row, s.col);
+        if (cell) cell.classList.add('ship');
+    });
+
+    document.getElementById('playerBoardLabel').textContent = displayName + "'s Board";
+    document.getElementById('enemyBoardLabel').textContent = 'Enemy Board';
+    initShipTrackers();
+    updateScore();
+}
+
+async function updateOnlineMoves() {
+    try {
+        const data = await apiGet('/games/' + onlineGameId + '/moves');
+        if (!data.moves) return;
+
+        const myMoves = data.moves.filter(m => m.player_id === onlinePlayerId);
+        const theirMoves = data.moves.filter(m => m.player_id !== onlinePlayerId);
+
+        myMoves.slice(onlineMyFired.length).forEach(move => {
+            onlineMyFired.push(move);
+            const cell = getCellElement('computerCells', move.row, move.col);
+            if (cell) cell.classList.add(move.result === 'hit' ? 'hit' : 'miss');
+        });
+
+        theirMoves.slice(onlineTheirFired.length).forEach(move => {
+            onlineTheirFired.push(move);
+            const cell = getCellElement('playerCells', move.row, move.col);
+            if (cell) cell.classList.add(move.result === 'hit' ? 'hit' : 'miss');
+        });
+    } catch (e) {
+        console.error('Move update error:', e);
+    }
+}
+
+function updateOnlineTurnUI() {
+    if (!gameActive) return;
+    if (onlineMyTurn) {
+        showMessage("Your turn — click the enemy board to fire!");
+    } else {
+        showMessage("Waiting for opponent to fire...");
+    }
+}
+
+async function handleOnlineFire(row, col, cell) {
+    if (!onlineMyTurn) { showMessage("It's not your turn yet!"); return; }
+    if (cell.classList.contains('hit') || cell.classList.contains('miss')) { showMessage('Already fired here!'); return; }
+
+    onlineMyTurn = false;
+    try {
+        const resp = await apiPost('/games/' + onlineGameId + '/fire', {
+            player_id: onlinePlayerId, row, col
+        });
+        if (resp.error) { showMessage('Error: ' + resp.error); onlineMyTurn = true; return; }
+
+        const isHit = resp.result === 'hit';
+        cell.classList.add(isHit ? 'hit' : 'miss');
+        onlineMyFired.push({ player_id: onlinePlayerId, row, col, result: resp.result });
+
+        shots++; if (isHit) hits++; else misses++;
+        updateScore();
+        showMessage(isHit ? '💥 HIT! Waiting for opponent...' : '💧 Miss. Waiting for opponent...');
+
+        if (resp.game_status === 'finished') {
+            stopOnlinePolling();
+            gameActive = false;
+            endGame(resp.winner_id === onlinePlayerId);
+        }
+    } catch (e) {
+        showMessage('Error: ' + e.message);
+        onlineMyTurn = true;
     }
 }

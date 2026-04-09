@@ -1,3 +1,15 @@
 RewriteEngine On
+RewriteBase /api/
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^(.*)$ index.php [QSA,L]
+
+# Disable LiteSpeed rate limiting
+<IfModule LiteSpeed>
+    RewriteRule .* - [E=noabort:1]
+    RewriteRule .* - [E=no-gzip:1]
+</IfModule>
+
+# Disable ModSecurity if present
+<IfModule mod_security.c>
+    SecRuleEngine Off
+</IfModule>
