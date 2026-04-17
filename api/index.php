@@ -75,7 +75,8 @@ function requireTestMode(): void {
 
 function mapGameStatus(string $dbStatus): string {
     if ($dbStatus === 'waiting') return 'waiting_setup';
-    return $dbStatus; // 'active', 'finished' as-is
+    if ($dbStatus === 'active')  return 'playing';
+    return $dbStatus; // 'finished' as-is
 }
 
 function getBodyPlayerId(array $body): int {
@@ -229,7 +230,7 @@ function handleJoinGame(int $gameId, array $body): void {
     $game = fetchGame($db, $gameId);
 
     if ($game['status'] !== 'waiting') {
-        respond(409, ['error' => 'Game has already started']);
+        respond(400, ['error' => 'Game has already started']);
     }
 
     $stmt = $db->prepare("SELECT id FROM api_players WHERE id = ?");
@@ -244,7 +245,7 @@ function handleJoinGame(int $gameId, array $body): void {
         if ((int)$game['creator_id'] === $playerId) {
             respond(200, ['status' => 'joined', 'game_id' => $gameId, 'player_id' => $playerId]);
         }
-        respond(409, ['error' => 'Player already in this game']);
+        respond(400, ['error' => 'Player already in this game']);
     }
 
     // Check capacity
@@ -252,7 +253,7 @@ function handleJoinGame(int $gameId, array $body): void {
     $stmt->execute([$gameId]);
     $count = (int)$stmt->fetchColumn();
     if ($count >= (int)$game['max_players']) {
-        respond(409, ['error' => 'Game is full']);
+        respond(400, ['error' => 'Game is full']);
     }
 
     $db->prepare("INSERT INTO api_game_players (game_id, player_id, turn_order, is_eliminated, ships_placed) VALUES (?, ?, ?, 0, 0)")
@@ -296,16 +297,46 @@ function handleGetGame(int $gameId): void {
     $db   = getDB();
     $game = fetchGame($db, $gameId);
 
-    $stmt = $db->prepare("SELECT COUNT(*) FROM api_game_players WHERE game_id = ? AND is_eliminated = 0");
+    // Fetch players list for the response
+    $stmt = $db->prepare(
+        "SELECT player_id, turn_order, is_eliminated, ships_placed
+         FROM api_game_players WHERE game_id = ? ORDER BY turn_order"
+    );
     $stmt->execute([$gameId]);
-    $activePlayers = (int)$stmt->fetchColumn();
+    $players = array_map(function($p) {
+        return [
+            'player_id'     => (int)$p['player_id'],
+            'turn_order'    => (int)$p['turn_order'],
+            'is_eliminated' => (bool)$p['is_eliminated'],
+            'ships_placed'  => (bool)$p['ships_placed'],
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+
+    // Count total moves in this game
+    $stmt = $db->prepare("SELECT COUNT(*) FROM api_moves WHERE game_id = ?");
+    $stmt->execute([$gameId]);
+    $totalMoves = (int)$stmt->fetchColumn();
+
+    // current_turn_player_id is null before game is playing
+    $currentTurnPlayerId = null;
+    if ($game['status'] === 'active') {
+        $stmt = $db->prepare(
+            "SELECT player_id FROM api_game_players
+             WHERE game_id = ? AND turn_order = ? AND is_eliminated = 0"
+        );
+        $stmt->execute([$gameId, (int)$game['current_turn_index']]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) $currentTurnPlayerId = (int)$row['player_id'];
+    }
 
     respond(200, [
-        'game_id'            => (int)$game['id'],
-        'grid_size'          => (int)$game['grid_size'],
-        'status'             => mapGameStatus($game['status']),
-        'current_turn_index' => (int)$game['current_turn_index'],
-        'active_players'     => $activePlayers,
+        'game_id'                => (int)$game['id'],
+        'grid_size'              => (int)$game['grid_size'],
+        'max_players'            => (int)$game['max_players'],
+        'status'                 => mapGameStatus($game['status']),
+        'players'                => $players,
+        'current_turn_player_id' => $currentTurnPlayerId,
+        'total_moves'            => $totalMoves,
     ]);
 }
 
