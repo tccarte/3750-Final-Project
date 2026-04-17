@@ -1,0 +1,93 @@
+[
+  {
+    "test_id": "KM_REQ_01",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Player 2 joins waiting_setup game returns 200 with joined status",
+    "why": "When a game exists in waiting_setup and player 2 posts a valid join, the server must return 200 and confirm the join so the client can advance its UI to the placement phase",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/join",
+    "headers": {},
+    "body": { "player_id": 2 },
+    "expected_status": 200,
+    "expected_response_contains": { "status": "joined" },
+    "requires": "game_created"
+  },
+  {
+    "test_id": "KM_REQ_02",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Join with missing player_id returns 400 bad_request",
+    "why": "A join request body with no player_id is malformed per spec v2.3 and must be rejected with 400 rather than silently creating or attaching a player",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/join",
+    "headers": {},
+    "body": {},
+    "expected_status": 400,
+    "expected_response_contains": { "error": "bad_request" },
+    "requires": "game_created"
+  },
+  {
+    "test_id": "KM_REQ_03",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Duplicate join by player 1 after already joined returns 409 conflict",
+    "why": "Player 1 is already in the game when state is game_joined, so a second join with player_id 1 is a conflict the server must reject with 409 per the duplicate-action pattern used for duplicate fire",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/join",
+    "headers": {},
+    "body": { "player_id": 1 },
+    "expected_status": 409,
+    "expected_response_contains": { "error": "conflict" },
+    "requires": "game_joined"
+  },
+  {
+    "test_id": "KM_REQ_04",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Valid fire by player 1 on guaranteed miss cell returns 200 with miss",
+    "why": "Autograder places P2 ships only at (0,1), (2,3), and (4,0) on an 8x8 grid, so firing at row 7 col 7 on P1's turn must return 200 with result miss and advance the game forward",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/fire",
+    "headers": {},
+    "body": { "player_id": 1, "row": 7, "col": 7 },
+    "expected_status": 200,
+    "expected_response_contains": { "result": "miss" },
+    "requires": "game_playing"
+  },
+  {
+    "test_id": "KM_REQ_05",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Valid fire by player 1 on known P2 ship cell returns 200 with hit",
+    "why": "Autograder places a P2 ship at row 0 col 1, so when P1 fires at that cell on their first turn the server must return 200 and report the shot as a hit",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/fire",
+    "headers": {},
+    "body": { "player_id": 1, "row": 0, "col": 1 },
+    "expected_status": 200,
+    "expected_response_contains": { "result": "hit" },
+    "requires": "game_playing"
+  },
+  {
+    "test_id": "KM_REQ_06",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Fire out of turn by player 2 before player 1 moves returns 403",
+    "why": "The game starts on player 1's turn, so any fire attempt by player 2 before player 1 has moved is forbidden and must return 403 to protect turn order",
+    "method": "POST",
+    "endpoint": "/api/games/{id}/fire",
+    "headers": {},
+    "body": { "player_id": 2, "row": 4, "col": 4 },
+    "expected_status": 403,
+    "expected_response_contains": { "error": "forbidden" },
+    "requires": "game_playing"
+  },
+  {
+    "test_id": "KM_REQ_07",
+    "source_team": "Kevin Murphy & Taylor Carter",
+    "name": "Move history GET on fresh playing game returns 200",
+    "why": "Before any fire has happened in a game that just entered playing status, GET moves must still return 200 so clients can render the empty history without error",
+    "method": "GET",
+    "endpoint": "/api/games/{id}/moves",
+    "headers": {},
+    "body": null,
+    "expected_status": 200,
+    "expected_response_contains": {},
+    "requires": "game_playing"
+  }
+]
