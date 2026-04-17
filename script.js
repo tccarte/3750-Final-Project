@@ -29,6 +29,8 @@ let onlineTheirFired = [];  // moves opponent fired
 let onlineShipsPlaced = []; // cells clicked during online placement
 let onlineMyTurn = false;
 let onlinePollingInterval = null;
+let lobbyPollingInterval = null;
+let onlineGridSize = 10;
 const API_BASE = '/api';
 
 // Ship placement state
@@ -82,14 +84,15 @@ document.addEventListener('DOMContentLoaded', () => {
         gameMode = 'online';
         document.getElementById('modeScreen').style.display = 'none';
         document.getElementById('onlineLobby').style.display = 'block';
+        startLobbyPolling();
     });
     document.getElementById('onlineBack').addEventListener('click', () => {
+        stopLobbyPolling();
         document.getElementById('onlineLobby').style.display = 'none';
         document.getElementById('modeScreen').style.display = 'block';
         document.getElementById('onlineMessage').textContent = '';
     });
     document.getElementById('onlineCreate').addEventListener('click', createOnlineGame);
-    document.getElementById('onlineJoin').addEventListener('click', joinOnlineGame);
     document.getElementById('onlineConfirmPlacement').addEventListener('click', confirmOnlinePlacement);
 
     document.getElementById('newGame').addEventListener('click', () => resetGame());
@@ -259,20 +262,21 @@ function initPlacementPhase() {
 
 // ===================== GRID CREATION =====================
 
-function createPlacementGrid() {
+function createPlacementGrid(size = 10) {
     const container = document.getElementById('placementGrid');
     container.innerHTML = '';
-    container.appendChild(createGridElement('placement'));
+    container.appendChild(createGridElement('placement', size));
 }
 
-function createGridElement(gridId) {
+function createGridElement(gridId, size = 10) {
     const wrapper = document.createElement('div');
-    const rows = ['A','B','C','D','E','F','G','H','I','J'];
+    const rowLabels = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').slice(0, size);
 
     const header = document.createElement('div');
     header.className = 'grid-header';
+    header.style.gridTemplateColumns = `30px repeat(${size}, 38px)`;
     header.innerHTML = '<div class="corner"></div>';
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= size; i++) {
         header.innerHTML += `<div class="col-label">${i}</div>`;
     }
     wrapper.appendChild(header);
@@ -280,19 +284,20 @@ function createGridElement(gridId) {
     const grid = document.createElement('div');
     grid.className = 'grid';
     grid.id = gridId + 'Cells';
+    grid.style.gridTemplateColumns = `30px repeat(${size}, 38px)`;
 
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < size; i++) {
         const rowLabel = document.createElement('div');
         rowLabel.className = 'row-label';
-        rowLabel.textContent = rows[i];
+        rowLabel.textContent = rowLabels[i];
         grid.appendChild(rowLabel);
 
-        for (let j = 0; j < 10; j++) {
+        for (let j = 0; j < size; j++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
             cell.dataset.row = i;
             cell.dataset.col = j;
-            cell.dataset.coord = rows[i] + (j + 1);
+            cell.dataset.coord = rowLabels[i] + (j + 1);
 
             if (gridId === 'placement') {
                 cell.addEventListener('click', () => handlePlacementClick(i, j));
@@ -790,7 +795,25 @@ function showMessage(text, className = '') {
 async function endGame(playerWon) {
     if (gameMode === 'online') {
         stopOnlinePolling();
-        showGameOverModal(playerWon, null);
+        const ti = document.getElementById('turnIndicator');
+        if (ti) ti.style.display = 'none';
+        let apiStats = null;
+        if (onlinePlayerId) {
+            try {
+                const data = await apiGet('/players/' + onlinePlayerId + '/stats');
+                if (data.player_id) {
+                    apiStats = {
+                        totalGames: data.games_played,
+                        wins: data.wins,
+                        losses: data.losses,
+                        bestAccuracy: (data.accuracy * 100).toFixed(1),
+                        currentWinStreak: 0,
+                        bestWinStreak: 0
+                    };
+                }
+            } catch (e) {}
+        }
+        showGameOverModal(playerWon, apiStats);
         return;
     }
     try {
@@ -861,8 +884,8 @@ function hideGameOverModal() {
 
 function getCellElement(gridId, row, col) {
     const grid = document.getElementById(gridId);
-    const index = row * 11 + col + 1;
-    return grid.children[index];
+    if (!grid) return null;
+    return grid.querySelector(`[data-row="${row}"][data-col="${col}"]`);
 }
 
 function coordToRowCol(coord) {
@@ -874,6 +897,15 @@ function coordToRowCol(coord) {
 
 function resetGame() {
     stopOnlinePolling();
+    stopLobbyPolling();
+    const ti = document.getElementById('turnIndicator');
+    if (ti) { ti.style.display = 'none'; ti.className = 'turn-indicator'; }
+    const mhp = document.getElementById('moveHistoryPanel');
+    if (mhp) {
+        mhp.style.display = 'none';
+        document.getElementById('moveHistoryList').innerHTML = '';
+        document.getElementById('moveCount').textContent = '0 moves';
+    }
     onlinePlayerId = null; onlineGameId = null; onlineTurnOrder = null;
     onlineMyShips = []; onlineMyFired = []; onlineTheirFired = [];
     onlineShipsPlaced = []; onlineMyTurn = false;
@@ -1051,13 +1083,16 @@ async function createOnlineGame() {
     const btn = document.getElementById('onlineCreate');
     btn.disabled = true;
     document.getElementById('onlineMessage').textContent = 'Creating game...';
+    onlineGridSize = parseInt(document.getElementById('gridSizeSelect').value) || 10;
+    stopLobbyPolling();
     try {
-        const pResp = await apiPost('/players', { username: displayName });
+        const username = sanitizeUsername(displayName);
+        const pResp = await apiPost('/players', { username });
         if (!pResp.player_id) throw new Error(pResp.error || 'Could not create player');
         onlinePlayerId = pResp.player_id;
         onlineTurnOrder = 0;
 
-        const gResp = await apiPost('/games', { creator_id: onlinePlayerId, grid_size: 10, max_players: 2 });
+        const gResp = await apiPost('/games', { creator_id: onlinePlayerId, grid_size: onlineGridSize, max_players: 2 });
         if (!gResp.game_id) throw new Error(gResp.error || 'Could not create game');
         onlineGameId = gResp.game_id;
 
@@ -1066,6 +1101,7 @@ async function createOnlineGame() {
     } catch (e) {
         document.getElementById('onlineMessage').textContent = 'Error: ' + e.message;
         btn.disabled = false;
+        startLobbyPolling();
     }
 }
 
@@ -1111,7 +1147,7 @@ function showOnlinePlacement() {
         document.getElementById('onlineGameIdDisplay').style.display = 'block';
     }
 
-    createPlacementGrid();
+    createPlacementGrid(onlineGridSize);
     showMessage('Click 3 cells on the grid to place your ships.');
 }
 
@@ -1201,20 +1237,22 @@ async function checkOnlineGameState() {
     }
 }
 
-async function startOnlineGame(game) {
+async function startOnlineGame(_game) {
     gameState = 'playing';
     gameActive = true;
     shots = 0; hits = 0; misses = 0;
     onlineMyFired = []; onlineTheirFired = [];
 
     document.getElementById('gameScreen').style.display = 'block';
+    document.getElementById('turnIndicator').style.display = 'block';
+    document.getElementById('moveHistoryPanel').style.display = 'block';
 
     const playerContainer = document.getElementById('playerGrid');
     const computerContainer = document.getElementById('computerGrid');
     playerContainer.innerHTML = '';
     computerContainer.innerHTML = '';
-    playerContainer.appendChild(createGridElement('player'));
-    computerContainer.appendChild(createGridElement('computer'));
+    playerContainer.appendChild(createGridElement('player', onlineGridSize));
+    computerContainer.appendChild(createGridElement('computer', onlineGridSize));
 
     onlineMyShips.forEach(s => {
         const cell = getCellElement('playerCells', s.row, s.col);
@@ -1246,6 +1284,8 @@ async function updateOnlineMoves() {
             const cell = getCellElement('playerCells', move.row, move.col);
             if (cell) cell.classList.add(move.result === 'hit' ? 'hit' : 'miss');
         });
+
+        renderMoveHistory(data.moves);
     } catch (e) {
         console.error('Move update error:', e);
     }
@@ -1253,11 +1293,120 @@ async function updateOnlineMoves() {
 
 function updateOnlineTurnUI() {
     if (!gameActive) return;
+    const indicator = document.getElementById('turnIndicator');
     if (onlineMyTurn) {
+        if (indicator) { indicator.textContent = '⚡ YOUR TURN — Click the enemy board to fire!'; indicator.className = 'turn-indicator turn-yours'; }
         showMessage("Your turn — click the enemy board to fire!");
     } else {
+        if (indicator) { indicator.textContent = '⏳ Waiting for opponent...'; indicator.className = 'turn-indicator turn-theirs'; }
         showMessage("Waiting for opponent to fire...");
     }
+}
+
+// ===================== LOBBY =====================
+
+function sanitizeUsername(name) {
+    return (name || 'Player').replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || 'Player';
+}
+
+function startLobbyPolling() {
+    stopLobbyPolling();
+    fetchOpenGames();
+    lobbyPollingInterval = setInterval(fetchOpenGames, 3000);
+}
+
+function stopLobbyPolling() {
+    if (lobbyPollingInterval) { clearInterval(lobbyPollingInterval); lobbyPollingInterval = null; }
+}
+
+async function fetchOpenGames() {
+    try {
+        const data = await apiGet('/games');
+        if (data.games !== undefined) renderGameList(data.games);
+    } catch (e) {}
+}
+
+function renderGameList(games) {
+    const list = document.getElementById('gamesList');
+    if (!list) return;
+    if (games.length === 0) {
+        list.innerHTML = '<div class="games-empty">No open games — be the first to create one!</div>';
+        return;
+    }
+    list.innerHTML = '';
+    games.forEach(game => {
+        const item = document.createElement('div');
+        item.className = 'game-item';
+        item.innerHTML = `
+            <div class="game-item-info">
+                <span class="game-item-id">#${game.game_id}</span>
+                <span class="game-item-creator">${game.creator_name}</span>
+                <span class="game-item-meta">${game.grid_size}×${game.grid_size} · ${game.player_count}/${game.max_players} players</span>
+            </div>
+            <button class="btn btn-primary game-join-btn">Join</button>
+        `;
+        item.querySelector('.game-join-btn').addEventListener('click', () => {
+            joinGameFromLobby(game.game_id, game.grid_size);
+        });
+        list.appendChild(item);
+    });
+}
+
+async function joinGameFromLobby(gameId, gridSize) {
+    stopLobbyPolling();
+    onlineGridSize = gridSize || 10;
+    onlineTurnOrder = 1;
+    onlineGameId = gameId;
+    document.getElementById('onlineMessage').textContent = 'Joining...';
+    try {
+        const username = sanitizeUsername(displayName);
+        const pResp = await apiPost('/players', { username });
+        if (!pResp.player_id) throw new Error(pResp.error || 'Could not create player');
+        onlinePlayerId = pResp.player_id;
+
+        const jResp = await apiPost('/games/' + onlineGameId + '/join', { player_id: onlinePlayerId });
+        if (jResp.error) throw new Error(jResp.error);
+
+        document.getElementById('onlineLobby').style.display = 'none';
+        showOnlinePlacement();
+    } catch (e) {
+        document.getElementById('onlineMessage').textContent = 'Error: ' + e.message;
+        startLobbyPolling();
+    }
+}
+
+// ===================== MOVE HISTORY =====================
+
+function renderMoveHistory(moves) {
+    const list = document.getElementById('moveHistoryList');
+    const countEl = document.getElementById('moveCount');
+    if (!list) return;
+
+    countEl.textContent = moves.length + ' move' + (moves.length !== 1 ? 's' : '');
+    const currentCount = list.querySelectorAll('.move-entry').length;
+    const newMoves = moves.slice(currentCount);
+
+    newMoves.forEach(move => {
+        const isMe = move.player_id === onlinePlayerId;
+        const rowLabel = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[move.row] || move.row;
+        const coord = rowLabel + (move.col + 1);
+        let timeStr = '';
+        if (move.created_at) {
+            try { timeStr = new Date(move.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch (e) {}
+        }
+        const entry = document.createElement('div');
+        entry.className = 'move-entry ' + (isMe ? 'move-you' : 'move-opponent');
+        entry.innerHTML = `
+            <span class="move-icon">${move.result === 'hit' ? '💥' : '💧'}</span>
+            <span class="move-who">${isMe ? 'YOU' : 'OPP'}</span>
+            <span class="move-coord">${coord}</span>
+            <span class="move-result ${move.result}">${move.result.toUpperCase()}</span>
+            <span class="move-time">${timeStr}</span>
+        `;
+        list.appendChild(entry);
+    });
+
+    list.scrollTop = list.scrollHeight;
 }
 
 async function handleOnlineFire(row, col, cell) {

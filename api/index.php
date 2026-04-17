@@ -8,6 +8,10 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, X-Test-Password');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('Vary: X-Test-Password');
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(204);
@@ -44,6 +48,7 @@ function route(string $method, string $path, array $body): void {
     if ($method === 'POST' && $path === '/reset')   { handleReset(); return; }
     if ($method === 'POST' && $path === '/players') { handleCreatePlayer($body); return; }
     if ($method === 'GET'  && preg_match('#^/players/(\d+)/stats$#', $path, $m)) { handleGetStats((int)$m[1]); return; }
+    if ($method === 'GET'  && $path === '/games')   { handleListGames(); return; }
     if ($method === 'POST' && $path === '/games')   { handleCreateGame($body); return; }
     if ($method === 'POST' && preg_match('#^/games/(\d+)/join$#', $path, $m))  { handleJoinGame((int)$m[1], $body); return; }
     if ($method === 'GET'  && preg_match('#^/games/(\d+)$#', $path, $m))       { handleGetGame((int)$m[1]); return; }
@@ -51,7 +56,7 @@ function route(string $method, string $path, array $body): void {
     if ($method === 'POST' && preg_match('#^/games/(\d+)/fire$#', $path, $m))  { handleFire((int)$m[1], $body); return; }
     if ($method === 'GET'  && preg_match('#^/games/(\d+)/moves$#', $path, $m)) { handleGetMoves((int)$m[1]); return; }
 
-    respond(404, ['error' => 'not_found']);
+    respond(404, ['error' => 'Endpoint not found']);
 }
 
 // ===================== HELPERS =====================
@@ -63,25 +68,25 @@ function respond(int $code, array $data): void {
 }
 
 function requireTestMode(): void {
-    if (!TEST_MODE) respond(403, ['error' => 'forbidden']);
+    if (!TEST_MODE) respond(403, ['error' => 'Invalid or missing X-Test-Password header']);
     $header = $_SERVER['HTTP_X_TEST_PASSWORD'] ?? '';
-    if ($header !== TEST_PASSWORD) respond(403, ['error' => 'forbidden']);
+    if ($header !== TEST_PASSWORD) respond(403, ['error' => 'Invalid or missing X-Test-Password header']);
+}
+
+function mapGameStatus(string $dbStatus): string {
+    if ($dbStatus === 'waiting') return 'waiting_setup';
+    return $dbStatus; // 'active', 'finished' as-is
 }
 
 function getBodyPlayerId(array $body): int {
     return (int)($body['player_id'] ?? $body['playerId'] ?? 0);
 }
 
-function mapGameStatus(string $dbStatus): string {
-    $map = ['waiting' => 'waiting_setup', 'active' => 'playing'];
-    return $map[$dbStatus] ?? $dbStatus;
-}
-
 function fetchGame(PDO $db, int $gameId): array {
     $stmt = $db->prepare("SELECT * FROM api_games WHERE id = ?");
     $stmt->execute([$gameId]);
     $game = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$game) respond(404, ['error' => 'not_found']);
+    if (!$game) respond(404, ['error' => 'Game not found']);
     return $game;
 }
 
@@ -89,7 +94,7 @@ function fetchGamePlayer(PDO $db, int $gameId, int $playerId): array {
     $stmt = $db->prepare("SELECT * FROM api_game_players WHERE game_id = ? AND player_id = ?");
     $stmt->execute([$gameId, $playerId]);
     $gp = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$gp) respond(403, ['error' => 'forbidden']);
+    if (!$gp) respond(403, ['error' => 'Player not in this game']);
     return $gp;
 }
 
@@ -115,13 +120,19 @@ function handleReset(): void {
 
 // POST /api/players
 function handleCreatePlayer(array $body): void {
-    $username = $body['username'] ?? null;
+    if (!array_key_exists('username', $body)) {
+        respond(400, ['error' => 'Missing required field: username']);
+    }
+    $username = $body['username'];
     if ($username === null || $username === '') {
-        respond(400, ['error' => 'bad_request']);
+        respond(400, ['error' => 'Missing required field: username']);
     }
     $username = trim((string)$username);
-    if (strlen($username) < 1 || strlen($username) > 50) {
-        respond(400, ['error' => 'bad_request']);
+    if (strlen($username) < 1) {
+        respond(400, ['error' => 'Missing required field: username']);
+    }
+    if (strlen($username) > 50) {
+        respond(400, ['error' => 'Username too long']);
     }
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $username)) {
         respond(400, ['error' => 'bad_request']);
@@ -130,7 +141,8 @@ function handleCreatePlayer(array $body): void {
     $db = getDB();
     $stmt = $db->prepare("SELECT id FROM api_players WHERE username = ?");
     $stmt->execute([$username]);
-    if ($stmt->fetch()) {
+    $existing = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($existing) {
         respond(409, ['error' => 'Username already taken']);
     }
 
@@ -145,7 +157,7 @@ function handleGetStats(int $playerId): void {
     $stmt = $db->prepare("SELECT * FROM api_players WHERE id = ?");
     $stmt->execute([$playerId]);
     $p = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$p) respond(404, ['error' => 'not_found']);
+    if (!$p) respond(404, ['error' => 'Player not found']);
 
     $shots = (int)$p['total_shots'];
     $hits  = (int)$p['total_hits'];
@@ -163,27 +175,34 @@ function handleGetStats(int $playerId): void {
 
 // POST /api/games
 function handleCreateGame(array $body): void {
-    $creatorId  = (int)($body['creator_id'] ?? 0);
-    $gridSize   = $body['grid_size'] ?? null;
-    $maxPlayers = $body['max_players'] ?? null;
-
-    if (!$creatorId || $gridSize === null || $maxPlayers === null) {
-        respond(400, ['error' => 'bad_request']);
+    if (!isset($body['creator_id'])) {
+        respond(400, ['error' => 'Missing required field: creator_id']);
     }
-    $gridSize   = (int)$gridSize;
-    $maxPlayers = (int)$maxPlayers;
+    if (!isset($body['grid_size'])) {
+        respond(400, ['error' => 'Missing required field: grid_size']);
+    }
+    if (!isset($body['max_players'])) {
+        respond(400, ['error' => 'Missing required field: max_players']);
+    }
 
+    $creatorId  = (int)$body['creator_id'];
+    $gridSize   = (int)$body['grid_size'];
+    $maxPlayers = (int)$body['max_players'];
+
+    if ($creatorId <= 0) {
+        respond(400, ['error' => 'Invalid creator_id']);
+    }
     if ($gridSize < 5 || $gridSize > 15) {
-        respond(400, ['error' => 'bad_request']);
+        respond(400, ['error' => 'grid_size must be between 5 and 15']);
     }
-    if ($maxPlayers < 1) {
-        respond(400, ['error' => 'bad_request']);
+    if ($maxPlayers < 1 || $maxPlayers > 10) {
+        respond(400, ['error' => 'max_players must be between 1 and 10']);
     }
 
     $db = getDB();
     $stmt = $db->prepare("SELECT id FROM api_players WHERE id = ?");
     $stmt->execute([$creatorId]);
-    if (!$stmt->fetch()) respond(404, ['error' => 'not_found']);
+    if (!$stmt->fetch()) respond(404, ['error' => 'Player not found']);
 
     $db->prepare("INSERT INTO api_games (creator_id, grid_size, max_players, status, current_turn_index) VALUES (?, ?, ?, 'waiting', 0)")
        ->execute([$creatorId, $gridSize, $maxPlayers]);
@@ -204,34 +223,72 @@ function handleCreateGame(array $body): void {
 // POST /api/games/{id}/join
 function handleJoinGame(int $gameId, array $body): void {
     $playerId = getBodyPlayerId($body);
-    if (!$playerId) respond(400, ['error' => 'bad_request']);
+    if (!$playerId) respond(400, ['error' => 'Missing required field: player_id']);
 
     $db   = getDB();
     $game = fetchGame($db, $gameId);
 
     if ($game['status'] !== 'waiting') {
-        respond(400, ['error' => 'bad_request']);
+        respond(409, ['error' => 'Game has already started']);
     }
 
     $stmt = $db->prepare("SELECT id FROM api_players WHERE id = ?");
     $stmt->execute([$playerId]);
-    if (!$stmt->fetch()) respond(404, ['error' => 'not_found']);
+    if (!$stmt->fetch()) respond(404, ['error' => 'Player not found']);
 
+    // Check if player already in game
     $stmt = $db->prepare("SELECT 1 FROM api_game_players WHERE game_id = ? AND player_id = ?");
     $stmt->execute([$gameId, $playerId]);
-    if ($stmt->fetch()) respond(400, ['error' => 'Player already in this game']);
+    if ($stmt->fetch()) {
+        // If the player is the creator, treat as idempotent (they were auto-added)
+        if ((int)$game['creator_id'] === $playerId) {
+            respond(200, ['status' => 'joined', 'game_id' => $gameId, 'player_id' => $playerId]);
+        }
+        respond(409, ['error' => 'Player already in this game']);
+    }
 
+    // Check capacity
     $stmt = $db->prepare("SELECT COUNT(*) FROM api_game_players WHERE game_id = ?");
     $stmt->execute([$gameId]);
     $count = (int)$stmt->fetchColumn();
     if ($count >= (int)$game['max_players']) {
-        respond(400, ['error' => 'Game is full']);
+        respond(409, ['error' => 'Game is full']);
     }
 
     $db->prepare("INSERT INTO api_game_players (game_id, player_id, turn_order, is_eliminated, ships_placed) VALUES (?, ?, ?, 0, 0)")
        ->execute([$gameId, $playerId, $count]);
 
     respond(200, ['status' => 'joined', 'game_id' => $gameId, 'player_id' => $playerId]);
+}
+
+// GET /api/games
+function handleListGames(): void {
+    $db = getDB();
+    $stmt = $db->prepare("
+        SELECT g.id, g.grid_size, g.max_players, g.status, g.creator_id,
+               p.username AS creator_name,
+               COUNT(gp.player_id) AS player_count
+        FROM api_games g
+        LEFT JOIN api_players p ON g.creator_id = p.id
+        LEFT JOIN api_game_players gp ON g.id = gp.game_id
+        WHERE g.status = 'waiting'
+        GROUP BY g.id
+        ORDER BY g.id DESC
+        LIMIT 20
+    ");
+    $stmt->execute();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $games = array_map(function($g) {
+        return [
+            'game_id'      => (int)$g['id'],
+            'grid_size'    => (int)$g['grid_size'],
+            'max_players'  => (int)$g['max_players'],
+            'status'       => 'waiting_setup',
+            'creator_name' => $g['creator_name'] ?? 'Unknown',
+            'player_count' => (int)$g['player_count'],
+        ];
+    }, $rows);
+    respond(200, ['games' => $games]);
 }
 
 // GET /api/games/{id}
@@ -257,8 +314,9 @@ function handlePlaceShips(int $gameId, array $body): void {
     $playerId = getBodyPlayerId($body);
     $ships    = $body['ships'] ?? null;
 
-    if (!$playerId || !is_array($ships) || count($ships) !== 3) {
-        respond(400, ['error' => 'bad_request']);
+    if (!$playerId) respond(400, ['error' => 'Missing required field: player_id']);
+    if (!is_array($ships) || count($ships) !== 3) {
+        respond(400, ['error' => 'Exactly 3 ships required']);
     }
 
     $db       = getDB();
@@ -267,19 +325,19 @@ function handlePlaceShips(int $gameId, array $body): void {
     $gp       = fetchGamePlayer($db, $gameId, $playerId);
 
     if ((int)$gp['ships_placed']) {
-        respond(409, ['error' => 'conflict']);
+        respond(409, ['error' => 'Ships already placed for this player']);
     }
 
     $coords = [];
-    foreach ($ships as $i => $ship) {
-        if (!isset($ship['row'], $ship['col'])) respond(400, ['error' => 'bad_request']);
+    foreach ($ships as $ship) {
+        if (!isset($ship['row'], $ship['col'])) respond(400, ['error' => 'Missing ship coordinates']);
         $r = (int)$ship['row'];
         $c = (int)$ship['col'];
         if ($r < 0 || $r >= $gridSize || $c < 0 || $c >= $gridSize) {
-            respond(400, ['error' => 'bad_request']);
+            respond(400, ['error' => 'Ship position out of bounds']);
         }
         $key = "$r,$c";
-        if (isset($coords[$key])) respond(400, ['error' => 'bad_request']);
+        if (isset($coords[$key])) respond(400, ['error' => 'Duplicate ship positions']);
         $coords[$key] = true;
     }
 
@@ -316,7 +374,7 @@ function handleFire(int $gameId, array $body): void {
     $col      = $body['col'] ?? null;
 
     if (!$playerId || $row === null || $col === null) {
-        respond(400, ['error' => 'bad_request']);
+        respond(400, ['error' => 'Missing required fields']);
     }
     $row = (int)$row;
     $col = (int)$col;
@@ -330,14 +388,14 @@ function handleFire(int $gameId, array $body): void {
 
     $gridSize = (int)$game['grid_size'];
     if ($row < 0 || $row >= $gridSize || $col < 0 || $col >= $gridSize) {
-        respond(400, ['error' => 'bad_request']);
+        respond(400, ['error' => 'Position out of bounds']);
     }
 
     // Turn enforcement
     $stmt = $db->prepare("SELECT player_id, turn_order FROM api_game_players WHERE game_id = ? AND is_eliminated = 0 ORDER BY turn_order");
     $stmt->execute([$gameId]);
     $active = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if (empty($active)) respond(400, ['error' => 'bad_request']);
+    if (empty($active)) respond(400, ['error' => 'No active players']);
 
     $currentIdx    = (int)$game['current_turn_index'];
     $currentPlayer = null;
@@ -349,17 +407,17 @@ function handleFire(int $gameId, array $body): void {
     }
 
     if ((int)$currentPlayer['player_id'] !== $playerId) {
-        respond(403, ['error' => 'forbidden']);
+        respond(403, ['error' => 'It is not your turn']);
     }
 
     // Duplicate fire check
     $stmt = $db->prepare("SELECT COUNT(*) FROM api_moves WHERE game_id = ? AND player_id = ? AND row_pos = ? AND col_pos = ?");
     $stmt->execute([$gameId, $playerId, $row, $col]);
     if ((int)$stmt->fetchColumn() > 0) {
-        respond(409, ['error' => 'conflict']);
+        respond(409, ['error' => 'You already fired at this position']);
     }
 
-    // Check hit
+    // Check hit against all other players' ships
     $result      = 'miss';
     $hitPlayerId = null;
     foreach ($active as $p) {
@@ -454,7 +512,7 @@ function handleFire(int $gameId, array $body): void {
 // GET /api/games/{id}/moves
 function handleGetMoves(int $gameId): void {
     $db = getDB();
-    fetchGame($db, $gameId); // validates game exists
+    fetchGame($db, $gameId);
 
     $stmt = $db->prepare("SELECT id, player_id, row_pos AS row, col_pos AS col, result, move_number, created_at FROM api_moves WHERE game_id = ? ORDER BY move_number");
     $stmt->execute([$gameId]);
@@ -480,7 +538,7 @@ function handleTestRestart(int $gameId): void {
     $db = getDB();
     $stmt = $db->prepare("SELECT id FROM api_games WHERE id = ?");
     $stmt->execute([$gameId]);
-    if (!$stmt->fetch()) respond(404, ['error' => 'not_found']);
+    if (!$stmt->fetch()) respond(404, ['error' => 'Game not found']);
 
     $db->prepare("DELETE FROM api_moves WHERE game_id = ?")->execute([$gameId]);
     $db->prepare("DELETE FROM api_ships WHERE game_id = ?")->execute([$gameId]);
@@ -495,14 +553,14 @@ function handleTestPlaceShips(int $gameId, array $body): void {
     $playerId = getBodyPlayerId($body);
     $ships    = $body['ships'] ?? [];
 
-    if (!$playerId) respond(400, ['error' => 'bad_request']);
+    if (!$playerId) respond(400, ['error' => 'Missing required field: player_id']);
     if (!is_array($ships) || count($ships) !== 3) respond(400, ['error' => 'Exactly 3 ships required']);
 
     $db = getDB();
     $stmt = $db->prepare("SELECT grid_size FROM api_games WHERE id = ?");
     $stmt->execute([$gameId]);
     $game = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$game) respond(404, ['error' => 'not_found']);
+    if (!$game) respond(404, ['error' => 'Game not found']);
 
     $gridSize  = (int)$game['grid_size'];
     $allCoords = [];
@@ -510,10 +568,10 @@ function handleTestPlaceShips(int $gameId, array $body): void {
         $r = (int)($ship['row'] ?? -1);
         $c = (int)($ship['col'] ?? -1);
         if ($r < 0 || $r >= $gridSize || $c < 0 || $c >= $gridSize) {
-            respond(400, ['error' => "Ship $i position ($r,$c) out of bounds"]);
+            respond(400, ['error' => "Ship $i position out of bounds"]);
         }
         $key = "$r,$c";
-        if (isset($allCoords[$key])) respond(400, ['error' => "Overlapping ship at ($r,$c)"]);
+        if (isset($allCoords[$key])) respond(400, ['error' => "Overlapping ship positions"]);
         $allCoords[$key] = true;
     }
 
@@ -540,7 +598,7 @@ function handleTestGetBoard(int $gameId, int $playerId): void {
     $stmt = $db->prepare("SELECT grid_size FROM api_games WHERE id = ?");
     $stmt->execute([$gameId]);
     $game = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$game) respond(404, ['error' => 'not_found']);
+    if (!$game) respond(404, ['error' => 'Game not found']);
 
     $gridSize = (int)$game['grid_size'];
     $grid     = array_fill(0, $gridSize, array_fill(0, $gridSize, 'empty'));

@@ -106,22 +106,32 @@
 
         <!-- Online Lobby Screen -->
         <div id="onlineLobby" style="display:none;">
-            <div class="mode-card">
-                <h2>ONLINE BATTLE</h2>
-                <p class="mode-desc">Play against someone on another device</p>
-                <div class="mode-buttons" style="flex-direction:column; gap:1rem;">
-                    <button id="onlineCreate" class="btn btn-mode">
-                        <span class="mode-icon">➕</span>
-                        <span class="mode-label">Create Game</span>
-                        <span class="mode-detail">Start a new game and share the ID</span>
-                    </button>
-                    <div class="online-join-row">
-                        <input type="number" id="onlineGameIdInput" placeholder="Enter Game ID" class="online-id-input">
-                        <button id="onlineJoin" class="btn btn-secondary">Join</button>
+            <div class="lobby-layout">
+                <div class="lobby-sidebar">
+                    <h2 class="lobby-heading">ONLINE BATTLE</h2>
+                    <p class="lobby-subheading">Create or join a live game</p>
+                    <div class="lobby-create-form">
+                        <label class="lobby-label">GRID SIZE</label>
+                        <select id="gridSizeSelect" class="lobby-select">
+                            <option value="8">8 × 8</option>
+                            <option value="10" selected>10 × 10 (default)</option>
+                            <option value="12">12 × 12</option>
+                            <option value="15">15 × 15</option>
+                        </select>
+                        <button id="onlineCreate" class="btn btn-primary lobby-create-btn">+ Create Game</button>
+                    </div>
+                    <div id="onlineMessage" class="lobby-message"></div>
+                    <button id="onlineBack" class="btn btn-secondary lobby-back-btn">← Back</button>
+                </div>
+                <div class="lobby-games-panel">
+                    <div class="lobby-games-header">
+                        <span class="lobby-games-title">OPEN GAMES</span>
+                        <span class="lobby-live">● LIVE</span>
+                    </div>
+                    <div id="gamesList" class="games-list">
+                        <div class="games-empty">Loading games...</div>
                     </div>
                 </div>
-                <div id="onlineMessage" class="message" style="margin-top:1rem;"></div>
-                <button id="onlineBack" class="btn btn-secondary" style="margin-top:1rem;">← Back</button>
             </div>
         </div>
 
@@ -193,6 +203,7 @@
 
         <!-- Game Screen -->
         <div id="gameScreen" class="game-screen" style="display: none;">
+            <div id="turnIndicator" class="turn-indicator" style="display:none;"></div>
             <div class="boards-container">
                 <div class="board-column">
                     <div class="board-section your-board">
@@ -231,6 +242,13 @@
                         <div class="tracker-list" id="enemyShipList"></div>
                     </div>
                 </div>
+            </div>
+            <div id="moveHistoryPanel" class="move-history-panel" style="display:none;">
+                <div class="move-history-header">
+                    <span class="mh-title">MOVE LOG</span>
+                    <span id="moveCount" class="mh-count">0 moves</span>
+                </div>
+                <div id="moveHistoryList" class="move-history-list"></div>
             </div>
         </div>
 
