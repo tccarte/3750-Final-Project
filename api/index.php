@@ -47,6 +47,7 @@ function route(string $method, string $path, array $body): void {
     if ($method === 'GET'  && $path === '/health')  { handleHealth(); return; }
     if ($method === 'POST' && $path === '/reset')   { handleReset(); return; }
     if ($method === 'POST' && $path === '/players') { handleCreatePlayer($body); return; }
+    if ($method === 'GET'  && $path === '/players') { handleListPlayers(); return; }
     if ($method === 'GET'  && preg_match('#^/players/(\d+)/stats$#', $path, $m)) { handleGetStats((int)$m[1]); return; }
     if ($method === 'GET'  && $path === '/games')   { handleListGames(); return; }
     if ($method === 'POST' && $path === '/games')   { handleCreateGame($body); return; }
@@ -132,7 +133,7 @@ function handleCreatePlayer(array $body): void {
     if (strlen($username) < 1) {
         respond(400, ['error' => 'Missing required field: username']);
     }
-    if (strlen($username) > 50) {
+    if (strlen($username) > 30) {
         respond(400, ['error' => 'Username too long']);
     }
     if (!preg_match('/^[a-zA-Z0-9_]+$/', $username)) {
@@ -147,9 +148,39 @@ function handleCreatePlayer(array $body): void {
         respond(409, ['error' => 'Username already taken']);
     }
 
-    $db->prepare("INSERT INTO api_players (username, games_played, wins, losses, total_shots, total_hits) VALUES (?, 0, 0, 0, 0, 0)")
-       ->execute([$username]);
+    try {
+        $db->prepare("INSERT INTO api_players (username, games_played, wins, losses, total_shots, total_hits) VALUES (?, 0, 0, 0, 0, 0)")
+           ->execute([$username]);
+    } catch (PDOException $e) {
+        // Catch UNIQUE constraint violation (race condition safety net)
+        if ($e->errorInfo[1] === 1062 || strpos($e->getMessage(), 'Duplicate') !== false) {
+            respond(409, ['error' => 'Username already taken']);
+        }
+        throw $e;
+    }
     respond(201, ['player_id' => (int)$db->lastInsertId(), 'username' => $username]);
+}
+
+// GET /api/players
+function handleListPlayers(): void {
+    $db = getDB();
+    $stmt = $db->prepare("SELECT id, username, games_played, wins, losses, total_shots, total_hits FROM api_players ORDER BY id DESC LIMIT 100");
+    $stmt->execute();
+    $players = array_map(function($p) {
+        $shots = (int)$p['total_shots'];
+        $hits  = (int)$p['total_hits'];
+        return [
+            'player_id'    => (int)$p['id'],
+            'username'     => $p['username'],
+            'games_played' => (int)$p['games_played'],
+            'wins'         => (int)$p['wins'],
+            'losses'       => (int)$p['losses'],
+            'total_shots'  => $shots,
+            'total_hits'   => $hits,
+            'accuracy'     => $shots > 0 ? round($hits / $shots, 3) : 0.0,
+        ];
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    respond(200, ['players' => $players]);
 }
 
 // GET /api/players/{id}/stats
@@ -196,14 +227,14 @@ function handleCreateGame(array $body): void {
     if ($gridSize < 5 || $gridSize > 15) {
         respond(400, ['error' => 'grid_size must be between 5 and 15']);
     }
-    if ($maxPlayers < 1 || $maxPlayers > 10) {
-        respond(400, ['error' => 'max_players must be between 1 and 10']);
+    if ($maxPlayers < 2 || $maxPlayers > 10) {
+        respond(400, ['error' => 'max_players must be between 2 and 10']);
     }
 
     $db = getDB();
     $stmt = $db->prepare("SELECT id FROM api_players WHERE id = ?");
     $stmt->execute([$creatorId]);
-    if (!$stmt->fetch()) respond(404, ['error' => 'Player not found']);
+    if (!$stmt->fetch()) respond(400, ['error' => 'Invalid creator_id']);
 
     $db->prepare("INSERT INTO api_games (creator_id, grid_size, max_players, status, current_turn_index) VALUES (?, ?, ?, 'waiting', 0)")
        ->execute([$creatorId, $gridSize, $maxPlayers]);
@@ -241,10 +272,6 @@ function handleJoinGame(int $gameId, array $body): void {
     $stmt = $db->prepare("SELECT 1 FROM api_game_players WHERE game_id = ? AND player_id = ?");
     $stmt->execute([$gameId, $playerId]);
     if ($stmt->fetch()) {
-        // If the player is the creator, treat as idempotent (they were auto-added)
-        if ((int)$game['creator_id'] === $playerId) {
-            respond(200, ['status' => 'joined', 'game_id' => $gameId, 'player_id' => $playerId]);
-        }
         respond(400, ['error' => 'Player already in this game']);
     }
 
