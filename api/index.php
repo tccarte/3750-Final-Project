@@ -363,6 +363,8 @@ function handleGetGame(int $gameId): void {
         'status'                 => mapGameStatus($game['status']),
         'players'                => $players,
         'current_turn_player_id' => $currentTurnPlayerId,
+        'current_turn_index'     => (int)$game['current_turn_index'],
+        'winner_id'              => $game['winner_id'] !== null ? (int)$game['winner_id'] : null,
         'total_moves'            => $totalMoves,
     ]);
 }
@@ -373,8 +375,8 @@ function handlePlaceShips(int $gameId, array $body): void {
     $ships    = $body['ships'] ?? null;
 
     if (!$playerId) respond(400, ['error' => 'Missing required field: player_id']);
-    if (!is_array($ships) || count($ships) !== 3) {
-        respond(400, ['error' => 'Exactly 3 ships required']);
+    if (!is_array($ships) || count($ships) < 3) {
+        respond(400, ['error' => 'At least 3 ship cells required']);
     }
 
     $db       = getDB();
