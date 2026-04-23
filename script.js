@@ -60,18 +60,6 @@ const shipInfo = {
 // ===================== INIT =====================
 
 document.addEventListener('DOMContentLoaded', () => {
-    const themeBtn = document.getElementById('themeToggle');
-    const applyTheme = (light) => {
-        document.body.classList.toggle('light', light);
-        themeBtn.textContent = light ? '🌙' : '☀️';
-    };
-    applyTheme(localStorage.getItem('theme') === 'light');
-    themeBtn.addEventListener('click', () => {
-        const isLight = !document.body.classList.contains('light');
-        localStorage.setItem('theme', isLight ? 'light' : 'dark');
-        applyTheme(isLight);
-    });
-
     if (!restoreState()) {
         showModeSelection();
     }
@@ -180,10 +168,8 @@ async function fetchLeaderboard() {
 
 function updateLeaderboard(stats) {
     if (!stats) return;
-    const pw = document.getElementById('lbPlayerWins');
-    const aw = document.getElementById('lbAIWins');
-    if (pw) pw.textContent = stats.wins || 0;
-    if (aw) aw.textContent = stats.losses || 0;
+    document.getElementById('lbPlayerWins').textContent = stats.wins || 0;
+    document.getElementById('lbAIWins').textContent = stats.losses || 0;
 }
 
 // ===================== SHIP TRACKER =====================
@@ -1337,6 +1323,57 @@ async function startOnlineGame(_game) {
     updateScore();
 }
 
+// Recomputes the fleet trackers for online PvP from move history.
+//
+// Your own fleet: we know the exact layout (placedShips), so a ship is sunk
+// when every cell of that ship appears in the opponent's hit list.
+//
+// Enemy fleet: we don't know their layout, so we can't attribute specific
+// hits to specific ships. Instead we count total hits landed and walk the
+// known ship-size list [5,4,3,3,2] in order, marking ships sunk once the
+// cumulative hit count reaches each size threshold. The total count is
+// always right; the identity of which ship is marked sunk is a best guess
+// (real sink order depends on where the opponent placed ships). If the
+// backend later returns a sunk flag, switch this to use that instead.
+function updateOnlineShipTrackers() {
+    // --- your fleet ---
+    const myHitSet = new Set(
+        onlineTheirFired
+            .filter(m => m.result === 'hit')
+            .map(m => m.row + ',' + m.col)
+    );
+    const myStatus = placedShips.map(ship => {
+        const allHit = ship.positions.every(coord => {
+            const [r, c] = coordToRowCol(coord);
+            return myHitSet.has(r + ',' + c);
+        });
+        return { type: ship.type, size: ship.size, sunk: allHit };
+    });
+
+    // --- enemy fleet (best-guess without server-side sunk flag) ---
+    const myHitCount = onlineMyFired.filter(m => m.result === 'hit').length;
+    const enemySizes = shipsToPlace.slice().sort((a, b) => b.size - a.size);
+    let remaining = myHitCount;
+    const enemyStatus = shipsToPlace.map(ship => ({
+        type: ship.type,
+        size: ship.size,
+        sunk: false
+    }));
+    // Mark ships sunk greedily by largest size first until we run out of
+    // hits. This at least keeps the "X remaining" count accurate.
+    for (const s of enemySizes) {
+        if (remaining >= s.size) {
+            remaining -= s.size;
+            const idx = enemyStatus.findIndex(e => !e.sunk && e.type === s.type && e.size === s.size);
+            if (idx !== -1) enemyStatus[idx].sunk = true;
+        } else {
+            break;
+        }
+    }
+
+    updateShipTrackers({ player: myStatus, enemy: enemyStatus });
+}
+
 async function updateOnlineMoves() {
     try {
         const data = await apiGet('/games/' + onlineGameId + '/moves');
@@ -1358,6 +1395,7 @@ async function updateOnlineMoves() {
         });
 
         renderMoveHistory(data.moves);
+        updateOnlineShipTrackers();
     } catch (e) {
         console.error('Move update error:', e);
     }
@@ -1499,6 +1537,7 @@ async function handleOnlineFire(row, col, cell) {
 
         shots++; if (isHit) hits++; else misses++;
         updateScore();
+        updateOnlineShipTrackers();
         showMessage(isHit ? '💥 HIT! Waiting for opponent...' : '💧 Miss. Waiting for opponent...');
 
         if (resp.game_status === 'finished') {
