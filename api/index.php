@@ -145,7 +145,7 @@ function handleCreatePlayer(array $body): void {
     $stmt->execute([$username]);
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($existing) {
-        respond(409, ['error' => 'Username already taken']);
+        respond(200, ['player_id' => (int)$existing['id'], 'username' => $username]);
     }
 
     try {
@@ -375,8 +375,8 @@ function handlePlaceShips(int $gameId, array $body): void {
     $ships    = $body['ships'] ?? null;
 
     if (!$playerId) respond(400, ['error' => 'Missing required field: player_id']);
-    if (!is_array($ships) || count($ships) < 3) {
-        respond(400, ['error' => 'At least 3 ship cells required']);
+    if (!is_array($ships) || count($ships) !== 17) {
+        respond(400, ['error' => 'Exactly 17 ship cells required (5 ships: carrier=5, battleship=4, cruiser=3, submarine=3, destroyer=2)']);
     }
 
     $db       = getDB();
@@ -409,9 +409,13 @@ function handlePlaceShips(int $gameId, array $body): void {
     $db->prepare("UPDATE api_game_players SET ships_placed = 1 WHERE game_id = ? AND player_id = ?")
        ->execute([$gameId, $playerId]);
 
+    $stmt = $db->prepare("SELECT COUNT(*) FROM api_game_players WHERE game_id = ?");
+    $stmt->execute([$gameId]);
+    $joinedCount = (int)$stmt->fetchColumn();
+
     $stmt = $db->prepare("SELECT COUNT(*) FROM api_game_players WHERE game_id = ? AND ships_placed = 0");
     $stmt->execute([$gameId]);
-    if ((int)$stmt->fetchColumn() === 0) {
+    if ((int)$stmt->fetchColumn() === 0 && $joinedCount >= (int)$game['max_players']) {
         $db->prepare("UPDATE api_games SET status = 'active' WHERE id = ?")->execute([$gameId]);
     }
 

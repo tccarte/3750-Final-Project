@@ -60,6 +60,18 @@ const shipInfo = {
 // ===================== INIT =====================
 
 document.addEventListener('DOMContentLoaded', () => {
+    const themeBtn = document.getElementById('themeToggle');
+    const applyTheme = (light) => {
+        document.body.classList.toggle('light', light);
+        themeBtn.textContent = light ? '🌙' : '☀️';
+    };
+    applyTheme(localStorage.getItem('theme') === 'light');
+    themeBtn.addEventListener('click', () => {
+        const isLight = !document.body.classList.contains('light');
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        applyTheme(isLight);
+    });
+
     if (!restoreState()) {
         showModeSelection();
     }
@@ -168,8 +180,10 @@ async function fetchLeaderboard() {
 
 function updateLeaderboard(stats) {
     if (!stats) return;
-    document.getElementById('lbPlayerWins').textContent = stats.wins || 0;
-    document.getElementById('lbAIWins').textContent = stats.losses || 0;
+    const pw = document.getElementById('lbPlayerWins');
+    const aw = document.getElementById('lbAIWins');
+    if (pw) pw.textContent = stats.wins || 0;
+    if (aw) aw.textContent = stats.losses || 0;
 }
 
 // ===================== SHIP TRACKER =====================

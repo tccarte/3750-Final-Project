@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="styles.css?v=4">
+    <link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body>
     <div class="scanline-overlay"></div>
@@ -19,6 +19,7 @@
                 <h1>BATTLESHIP</h1>
                 <span class="logo-subtitle">NAVAL COMMAND</span>
             </div>
+            <button id="themeToggle" class="btn-theme-toggle" title="Toggle light/dark mode">☀️</button>
         </header>
 
         <div class="game-info">
@@ -44,36 +45,6 @@
             </div>
         </div>
 
-        <!-- Leaderboard -->
-        <div class="leaderboard">
-            <div class="leaderboard-inner">
-                <div class="lb-side lb-player">
-                    <span class="lb-label">YOU</span>
-                    <span class="lb-score" id="lbPlayerWins">0</span>
-                </div>
-                <div class="lb-center">
-                    <span class="lb-title">ALL TIME</span>
-                    <span class="lb-divider">—</span>
-                </div>
-                <div class="lb-side lb-ai">
-                    <span class="lb-score" id="lbAIWins">0</span>
-                    <span class="lb-label">AI</span>
-                </div>
-                <button id="resetStatsBtn" class="lb-reset-btn" title="Reset all-time score">↻ Reset</button>
-            </div>
-        </div>
-
-        <!-- Reset Confirmation Modal -->
-        <div id="resetConfirmModal" class="modal">
-            <div class="modal-content reset-confirm-content">
-                <h2>Reset All-Time Score?</h2>
-                <p>This will permanently clear your win/loss record. Are you sure?</p>
-                <div class="reset-confirm-buttons">
-                    <button id="resetCancel" class="btn btn-secondary">Cancel</button>
-                    <button id="resetConfirm" class="btn btn-danger">Reset</button>
-                </div>
-            </div>
-        </div>
 
         <!-- Mode Selection Screen -->
         <div id="modeScreen" class="mode-screen">
@@ -327,6 +298,6 @@
         </div>
     </div>
 
-    <script src="script.js?v=5"></script>
+    <script src="script.js?v=6"></script>
 </body>
 </html>

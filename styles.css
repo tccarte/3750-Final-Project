@@ -891,3 +891,50 @@ body {
     font-size: 0.62rem;
     margin-left: auto;
 }
+
+/* ======================== THEME TOGGLE ======================== */
+
+.game-header {
+    position: relative;
+    margin-bottom: 28px;
+}
+
+.btn-theme-toggle {
+    position: absolute;
+    top: 0; right: 0;
+    padding: 8px 12px;
+    font-size: 1.1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s;
+    line-height: 1;
+}
+.btn-theme-toggle:hover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+}
+
+/* ======================== LIGHT MODE ======================== */
+
+body.light {
+    --bg-deep: #eef1f7;
+    --bg-surface: #ffffff;
+    --bg-card: #ffffff;
+    --bg-elevated: #e4e9f2;
+    --border: #c8d0e0;
+    --border-light: #a8b8d0;
+    --text-primary: #111827;
+    --text-secondary: #374151;
+    --text-muted: #6b7fa0;
+    --accent-glow: rgba(240, 165, 0, 0.12);
+    --ocean: #c5d8e8;
+    --ocean-light: #b0cfe0;
+    --ocean-border: #90b5cc;
+    --ship: #7a8fa8;
+    --ship-border: #5a7090;
+}
+
+body.light .scanline-overlay { display: none; }
+body.light .modal { background-color: rgba(0,0,0,0.45); }
