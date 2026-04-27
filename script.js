@@ -60,6 +60,18 @@ const shipInfo = {
 // ===================== INIT =====================
 
 document.addEventListener('DOMContentLoaded', () => {
+    const themeBtn = document.getElementById('themeToggle');
+    const applyTheme = (light) => {
+        document.body.classList.toggle('light', light);
+        themeBtn.textContent = light ? '🌙' : '☀️';
+    };
+    applyTheme(localStorage.getItem('theme') === 'light');
+    themeBtn.addEventListener('click', () => {
+        const isLight = !document.body.classList.contains('light');
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+        applyTheme(isLight);
+    });
+
     if (!restoreState()) {
         showModeSelection();
     }
@@ -168,8 +180,10 @@ async function fetchLeaderboard() {
 
 function updateLeaderboard(stats) {
     if (!stats) return;
-    document.getElementById('lbPlayerWins').textContent = stats.wins || 0;
-    document.getElementById('lbAIWins').textContent = stats.losses || 0;
+    const pw = document.getElementById('lbPlayerWins');
+    const aw = document.getElementById('lbAIWins');
+    if (pw) pw.textContent = stats.wins || 0;
+    if (aw) aw.textContent = stats.losses || 0;
 }
 
 // ===================== SHIP TRACKER =====================
@@ -806,23 +820,7 @@ async function endGame(playerWon) {
         stopOnlinePolling();
         const ti = document.getElementById('turnIndicator');
         if (ti) ti.style.display = 'none';
-        let apiStats = null;
-        if (onlinePlayerId) {
-            try {
-                const data = await apiGet('/players/' + onlinePlayerId + '/stats');
-                if (data.player_id) {
-                    apiStats = {
-                        totalGames: data.games_played,
-                        wins: data.wins,
-                        losses: data.losses,
-                        bestAccuracy: (data.accuracy * 100).toFixed(1),
-                        currentWinStreak: 0,
-                        bestWinStreak: 0
-                    };
-                }
-            } catch (e) {}
-        }
-        showGameOverModal(playerWon, apiStats);
+        showGameOverModal(playerWon, null);
         return;
     }
     try {
@@ -1269,7 +1267,7 @@ async function checkOnlineGameState() {
                 await startOnlineGame(game);
             }
             await updateOnlineMoves();
-            endGame(game.winner_id === onlinePlayerId);
+            await endGame(game.winner_id === onlinePlayerId);
             return;
         }
 
@@ -1537,15 +1535,16 @@ async function handleOnlineFire(row, col, cell) {
 
         shots++; if (isHit) hits++; else misses++;
         updateScore();
-        updateOnlineShipTrackers();
         showMessage(isHit ? '💥 HIT! Waiting for opponent...' : '💧 Miss. Waiting for opponent...');
 
         if (resp.game_status === 'finished') {
             stopOnlinePolling();
             gameActive = false;
-            endGame(resp.winner_id === onlinePlayerId);
+            await endGame(resp.winner_id === onlinePlayerId);
             return;
         }
+
+        try { updateOnlineShipTrackers(); } catch (e) { console.error('Tracker error:', e); }
 
         // Immediately refresh state so the opponent's turn shows up right away
         // without waiting for the 2-second polling tick.
